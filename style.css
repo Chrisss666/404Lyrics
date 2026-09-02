@@ -48,6 +48,11 @@
 	--lx-glide: 620ms;
 	--lx-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
+	/* Overlap of Spotify's translucent top bar, measured at runtime by
+	 * index.js. 64px (the standard top-bar height) is the pre-measurement
+	 * default so the controls never start under the bar. */
+	--lx-safe-top: 64px;
+
 	animation: lx-app-in 0.4s ease both;
 }
 
@@ -132,7 +137,10 @@
 
 .lx-stage {
 	position: absolute;
-	inset: 0;
+	top: var(--lx-safe-top, 0px);
+	right: 0;
+	bottom: 0;
+	left: 0;
 	z-index: 2;
 	display: flex;
 	flex-direction: column;
@@ -355,7 +363,10 @@
 
 .lx-controls {
 	position: absolute;
-	top: clamp(14px, 3vh, 28px);
+	/* Sit clear of Spotify's translucent top bar (--lx-safe-top), plus a
+	 * little breathing room. Never fights the bar with z-index - it can't win
+	 * that, so it stays below it instead. */
+	top: calc(var(--lx-safe-top, 64px) + clamp(8px, 1.4vh, 16px));
 	right: clamp(14px, 3vw, 32px);
 	z-index: 5;
 	display: flex;
@@ -440,9 +451,13 @@
 	top: calc(100% + 10px);
 	right: 0;
 	width: 276px;
-	max-height: min(76vh, 560px);
+	/* Fit between the gear (already below the top bar) and the bottom edge, so
+	 * the panel is never clipped by .lx-app's overflow:hidden even on a short
+	 * window near the top. It self-scrolls past that. */
+	max-height: min(560px, calc(100vh - var(--lx-safe-top, 64px) - 130px));
 	overflow-y: auto;
 	overflow-x: hidden;
+	overscroll-behavior: contain;
 	padding: 12px;
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	border-radius: 16px;
@@ -765,7 +780,7 @@
 		font-size: clamp(1.3rem, 6vw, 1.9rem);
 	}
 	.lx-controls {
-		top: 10px;
+		top: calc(var(--lx-safe-top, 64px) + 8px);
 		right: 10px;
 		gap: 6px;
 	}

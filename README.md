@@ -205,6 +205,14 @@ sets the active-word classes only when the word changes, and writes the
 `--word-progress` custom property straight to the DOM every frame — no React
 render per frame. `clip-path` on a stacked `.lx-word__fill` does the fill.
 
+**Top safe area.** The app mounts inside Spotify's main-view scroll node, and
+Spotify floats a translucent top bar over the first stretch of it. `index.js`
+measures how far that chrome overlaps the app's top edge (with a 64 px
+grounded fallback) and exposes it as `--lx-safe-top`; the control cluster and
+the lyric column inset past it. Re-measured on mount, resize, scroll and
+fullscreen change. Fighting the bar with `z-index` can't work — it's in
+Spotify's stacking context, not the app's.
+
 Changes take effect after `spicetify apply`, which copies the files into the
 Spotify install. Debug through Spotify's DevTools.
 

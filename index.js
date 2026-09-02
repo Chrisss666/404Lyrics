@@ -171,6 +171,8 @@ class LyricsApp extends react.Component {
 		this.raf = 0;
 		this.hideTimer = 0;
 		this._translatedThisEnable = false;
+		this._safeTopTimers = [];
+		this._safeTop = -1; // sentinel: first measurement always applies
 
 		this.rootRef = react.createRef();
 		this.stageRef = react.createRef();
@@ -184,7 +186,88 @@ class LyricsApp extends react.Component {
 		this.onFullscreenChange = this.onFullscreenChange.bind(this);
 		this.onDocumentClick = this.onDocumentClick.bind(this);
 		this.onReduceMotionChange = this.onReduceMotionChange.bind(this);
+		this.measureSafeTop = this.measureSafeTop.bind(this);
 		this.seek = this.seek.bind(this);
+	}
+
+	/* ---------------------------------------------------------- top safe area
+	 * The custom app mounts inside Spotify's main-view scroll node, and Spotify
+	 * floats a translucent top bar over the first stretch of that node. Nothing
+	 * we set on z-index can lift our controls above it - it lives in a separate
+	 * stacking context that is Spotify's, not ours - so instead we measure how
+	 * far that chrome overlaps our top edge and inset the controls / lyric
+	 * column past it via the --lx-safe-top custom property. */
+	measureSafeTop() {
+		const app = this.rootRef.current;
+		if (!app) return;
+
+		// In immersive (browser fullscreen) our element fills the screen and
+		// Spotify's chrome isn't shown - no inset needed.
+		if (document.fullscreenElement === app) {
+			if (this._safeTop !== 0) {
+				this._safeTop = 0;
+				app.style.setProperty("--lx-safe-top", "0px");
+			}
+			return;
+		}
+
+		const TOP_CHROME = [
+			".main-topBar-container",
+			'[data-testid="topbar"]',
+			".Root__globalNav",
+			".main-globalNav-searchContainer",
+		];
+		const appTop = app.getBoundingClientRect().top;
+		let overlap = 0;
+		let sawChrome = false;
+
+		for (const selector of TOP_CHROME) {
+			for (const el of document.querySelectorAll(selector)) {
+				const r = el.getBoundingClientRect();
+				if (r.height === 0) continue;
+				sawChrome = true;
+				// Only bars that actually start at or above our top edge overlap us.
+				if (r.top <= appTop + 4 && r.bottom > appTop) overlap = Math.max(overlap, r.bottom - appTop);
+			}
+		}
+
+		// Grounded fallback: 64px is Spotify's standard top-bar height, used
+		// only when none of the selectors matched (chrome renamed / not ready).
+		const inset = overlap > 4 ? Math.round(overlap) + 8 : sawChrome ? 0 : 64;
+		if (inset === this._safeTop) return;
+		this._safeTop = inset;
+		app.style.setProperty("--lx-safe-top", inset + "px");
+	}
+
+	// Spotify's chrome settles asynchronously after the route mounts, and the
+	// top bar can resize on scroll, so re-measure a few times and on the
+	// signals that move it.
+	watchSafeTop() {
+		const run = () => this._mounted && this.measureSafeTop();
+		run();
+		this._safeTopTimers = [80, 300, 800, 2000].map((ms) => setTimeout(run, ms));
+
+		window.addEventListener("resize", this.measureSafeTop);
+
+		this._scrollNode =
+			document.querySelector(".Root__main-view .os-viewport") ||
+			document.querySelector(".Root__main-view .main-view-container__scroll-node") ||
+			document.querySelector(".Root__main-view");
+		if (this._scrollNode) this._scrollNode.addEventListener("scroll", this.measureSafeTop, { passive: true });
+
+		if (typeof ResizeObserver === "function") {
+			this._topObserver = new ResizeObserver(run);
+			const bar = document.querySelector(".main-topBar-container") || document.querySelector(".Root__globalNav");
+			if (bar) this._topObserver.observe(bar);
+		}
+	}
+
+	unwatchSafeTop() {
+		this._safeTopTimers.forEach(clearTimeout);
+		this._safeTopTimers = [];
+		window.removeEventListener("resize", this.measureSafeTop);
+		if (this._scrollNode) this._scrollNode.removeEventListener("scroll", this.measureSafeTop);
+		if (this._topObserver) this._topObserver.disconnect();
 	}
 
 	/* ------------------------------------------------------------ lifecycle */
@@ -208,6 +291,7 @@ class LyricsApp extends react.Component {
 		this.startClock();
 		this.loadTrack();
 		this.armAutoHide();
+		this.watchSafeTop();
 	}
 
 	componentWillUnmount() {
@@ -220,6 +304,7 @@ class LyricsApp extends react.Component {
 		if (this.motionQuery) this.motionQuery.removeEventListener("change", this.onReduceMotionChange);
 		document.removeEventListener("fullscreenchange", this.onFullscreenChange);
 		document.removeEventListener("pointerdown", this.onDocumentClick, true);
+		this.unwatchSafeTop();
 		if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 	}
 
@@ -501,6 +586,7 @@ class LyricsApp extends react.Component {
 
 	onFullscreenChange() {
 		this.safeSetState({ immersive: document.fullscreenElement === this.rootRef.current });
+		this.measureSafeTop();
 	}
 
 	onDocumentClick(e) {
