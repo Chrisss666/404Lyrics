@@ -16,22 +16,32 @@ const react = Spicetify.React;
 
 /* ------------------------------------------------------------- background */
 
+/* One background element, three looks. The palette (base + accent) always
+ * feeds it; `bgStyle` decides which layers are shown. The artwork layer is
+ * keyed by image URL and the gradient layer by palette, so each fades itself
+ * back in on a track change - a crossfade with no JS animation loop and no
+ * transitioned custom property. Blur / dim / animation intensity are CSS
+ * variables that index.js sets on .lx-app only when a setting is committed. */
 function BgLayer(props) {
-	const { info, palette, ambient, reduceMotion, artKey } = props;
+	const { info, palette, bgStyle, artKey } = props;
+	const showArt = bgStyle === "artwork" && info && info.image;
+
 	return react.createElement(
 		"div",
 		{
-			className: "lx-bg" + (ambient && !reduceMotion ? " lx-bg--ambient" : ""),
+			className: "lx-bg lx-bg--" + bgStyle,
 			style: { "--lx-base": palette.base, "--lx-accent": palette.accent },
 		},
-		info && info.image
+		showArt
 			? react.createElement("div", {
 					key: artKey,
 					className: "lx-bg__art",
 					style: { backgroundImage: `url("${info.image}")` },
 				})
 			: null,
-		react.createElement("div", { className: "lx-bg__grad" }),
+		// Keyed by palette so it remounts and fades in when the track's colours
+		// change - a crossfade without transitioning a custom property.
+		react.createElement("div", { key: palette.accent + palette.base, className: "lx-bg__grad" }),
 		react.createElement("div", { className: "lx-bg__scrim" })
 	);
 }
@@ -39,7 +49,7 @@ function BgLayer(props) {
 /* ------------------------------------------------------------- lyric list */
 
 function Lines(props) {
-	const { data, translations, activeIndex, showTranslations, onSeek, reduceMotion, wordsRef } = props;
+	const { data, translations, activeIndex, showTranslations, onSeek, reduceMotion, wordsRef, focus } = props;
 	const linesRef = react.useRef(null);
 	const karaoke = data.kind === "richsync";
 	const synced = data.kind === "synced" || karaoke;
@@ -57,7 +67,12 @@ function Lines(props) {
 		const target = stage.clientHeight * 0.42;
 		const lineCenter = active.offsetTop + active.offsetHeight / 2;
 		el.style.transform = `translate3d(0, ${Math.round(target - lineCenter)}px, 0)`;
-	}, [anchor, synced, showTranslations, translations, data]);
+	}, [anchor, synced, showTranslations, translations, data, focus]);
+
+	// Focus Mode: only the active line and its immediate neighbours stay on
+	// screen; everything past the second line out fades away. The two visible
+	// neighbours keep a readable opacity - it is de-emphasis, not a blackout.
+	const focusOpacity = (ad) => (ad === 0 ? undefined : ad === 1 ? 0.6 : ad === 2 ? 0.28 : 0);
 
 	const children = data.lines.map((line, i) => {
 		const text = (line.text || "").trim();
@@ -107,7 +122,9 @@ function Lines(props) {
 						"lx-line" +
 						(isActive ? " lx-line--active" : "") +
 						(synced && dist < 0 ? " lx-line--past" : ""),
-					style: synced ? { "--ad": ad, opacity: ad > 14 ? 0 : undefined } : undefined,
+					style: synced
+						? { "--ad": ad, opacity: focus ? focusOpacity(ad) : ad > 14 ? 0 : undefined }
+						: undefined,
 					role: seekable ? "button" : undefined,
 					tabIndex: seekable ? 0 : undefined,
 					"aria-label": seekable ? `Play from “${text || "instrumental break"}”` : undefined,
@@ -154,7 +171,11 @@ class LyricsApp extends react.Component {
 				"translate-enabled": LXSettings.get("translate-enabled"),
 				"translate-lang": LXSettings.get("translate-lang"),
 				karaoke: LXSettings.get("karaoke"),
-				ambient: LXSettings.get("ambient"),
+				"focus-mode": LXSettings.get("focus-mode"),
+				"bg-style": LXSettings.get("bg-style"),
+				"bg-blur": LXSettings.get("bg-blur"),
+				"bg-dim": LXSettings.get("bg-dim"),
+				"bg-anim": LXSettings.get("bg-anim"),
 				autohide: LXSettings.get("autohide"),
 			},
 		};
@@ -173,6 +194,8 @@ class LyricsApp extends react.Component {
 		this._translatedThisEnable = false;
 		this._safeTopTimers = [];
 		this._safeTop = -1; // sentinel: first measurement always applies
+		this._bgRaf = 0; // throttles live background-slider previews to 1/frame
+		this._pendingBg = null;
 
 		this.rootRef = react.createRef();
 		this.stageRef = react.createRef();
@@ -288,6 +311,7 @@ class LyricsApp extends react.Component {
 		document.addEventListener("fullscreenchange", this.onFullscreenChange);
 		document.addEventListener("pointerdown", this.onDocumentClick, true);
 
+		this.applyBgVars();
 		this.startClock();
 		this.loadTrack();
 		this.armAutoHide();
@@ -297,6 +321,7 @@ class LyricsApp extends react.Component {
 	componentWillUnmount() {
 		this._mounted = false;
 		cancelAnimationFrame(this.raf);
+		cancelAnimationFrame(this._bgRaf);
 		clearTimeout(this.hideTimer);
 		if (this.unsubscribe) this.unsubscribe();
 		if (this.lyricsAbort) this.lyricsAbort.abort();
@@ -566,12 +591,44 @@ class LyricsApp extends react.Component {
 		this.setState((s) => ({ settings: Object.assign({}, s.settings, { [key]: value }) }), () => {
 			if (key === "translate-enabled" || key === "translate-lang") this.retranslate();
 			if (key === "karaoke") this.refetchLyrics();
-			if (key === "autohide") this.armAutoHide();
+			if (key === "autohide" || key === "focus-mode") this.armAutoHide();
+			if (key === "bg-blur" || key === "bg-dim" || key === "bg-anim") this.applyBgVars();
 		});
 	}
 
 	toggleTranslate() {
 		this.updateSetting("translate-enabled", !this.state.settings["translate-enabled"]);
+	}
+
+	toggleFocus() {
+		this.updateSetting("focus-mode", !this.state.settings["focus-mode"]);
+	}
+
+	/* Background CSS variables. Set once from the stored settings, then only
+	 * when a background setting is committed - never per frame. */
+	applyBgVars() {
+		const el = this.rootRef.current;
+		if (!el) return;
+		const s = this.state.settings;
+		el.style.setProperty("--lx-blur", LXSettings.bgBlurPx(s["bg-blur"]) + "px");
+		el.style.setProperty("--lx-dim", LXSettings.bgDim(s["bg-dim"]).toFixed(3));
+		el.style.setProperty("--lx-anim-mult", String(LXSettings.ANIM_MULT[s["bg-anim"]] != null ? LXSettings.ANIM_MULT[s["bg-anim"]] : 1));
+	}
+
+	// Live preview while a background slider is dragged: write the CSS variable
+	// directly, coalesced to one update per frame so a heavy blur value is
+	// never recomputed more than once per paint. Persisted on release.
+	previewBg(key, value) {
+		this._pendingBg = { key, value };
+		if (this._bgRaf) return;
+		this._bgRaf = requestAnimationFrame(() => {
+			this._bgRaf = 0;
+			const el = this.rootRef.current;
+			const p = this._pendingBg;
+			if (!el || !p) return;
+			if (p.key === "bg-blur") el.style.setProperty("--lx-blur", LXSettings.bgBlurPx(p.value) + "px");
+			else if (p.key === "bg-dim") el.style.setProperty("--lx-dim", LXSettings.bgDim(p.value).toFixed(3));
+		});
 	}
 
 	toggleImmersive() {
@@ -600,15 +657,22 @@ class LyricsApp extends react.Component {
 
 	armAutoHide() {
 		clearTimeout(this.hideTimer);
-		if (!this.state.settings.autohide) {
+		const s = this.state.settings;
+		// Focus Mode always dims the chrome after a pause; the plain autohide
+		// setting does the same outside Focus Mode.
+		if (!s.autohide && !s["focus-mode"]) {
 			this.safeSetState({ controlsVisible: true });
 			return;
 		}
-		this.hideTimer = setTimeout(() => {
-			if (this._mounted && !this.state.menuOpen && !this.rootRef.current?.querySelector(".lx-controls:focus-within")) {
-				this.safeSetState({ controlsVisible: false });
-			}
-		}, 2600);
+		this.hideTimer = setTimeout(
+			() => {
+				const root = this.rootRef.current;
+				if (this._mounted && !this.state.menuOpen && !(root && root.querySelector(".lx-controls:focus-within, .lx-now:hover"))) {
+					this.safeSetState({ controlsVisible: false });
+				}
+			},
+			s["focus-mode"] ? 3200 : 2600
+		);
 	}
 
 	onPointerActivity() {
@@ -665,6 +729,7 @@ class LyricsApp extends react.Component {
 				onSeek: this.seek,
 				reduceMotion,
 				wordsRef: this.wordsRef,
+				focus: settings["focus-mode"],
 			});
 		}
 
@@ -675,6 +740,7 @@ class LyricsApp extends react.Component {
 
 	render() {
 		const { info, palette, settings, immersive, menuOpen, controlsVisible, reduceMotion, data, translations } = this.state;
+		const chromeVisible = controlsVisible || menuOpen;
 
 		return react.createElement(
 			"div",
@@ -682,7 +748,9 @@ class LyricsApp extends react.Component {
 				className:
 					"lx-app" +
 					(immersive ? " lx-app--immersive" : "") +
-					(reduceMotion ? " lx-app--still" : ""),
+					(reduceMotion ? " lx-app--still" : "") +
+					(settings["focus-mode"] ? " lx-app--focus" : "") +
+					" lx-anim-" + settings["bg-anim"],
 				ref: this.rootRef,
 				onMouseMove: this.onPointerActivity,
 				onKeyDown: this.onKeyActivity,
@@ -690,14 +758,13 @@ class LyricsApp extends react.Component {
 			react.createElement(BgLayer, {
 				info,
 				palette,
-				ambient: settings.ambient,
-				reduceMotion,
+				bgStyle: settings["bg-style"],
 				artKey: info ? info.image : "none",
 			}),
 			react.createElement("div", { className: "lx-stage", ref: this.stageRef }, this.renderStage()),
 			LXUi.controls({
 				settings,
-				visible: controlsVisible || menuOpen,
+				visible: chromeVisible,
 				immersive,
 				menuOpen,
 				busy: settings["translate-enabled"] && translations.status === "loading",
@@ -711,10 +778,12 @@ class LyricsApp extends react.Component {
 				},
 				onInteract: this.onPointerActivity,
 				onToggleTranslate: () => this.toggleTranslate(),
+				onToggleFocus: () => this.toggleFocus(),
 				onLang: (code) => this.updateSetting("translate-lang", code),
 				onImmersive: () => this.toggleImmersive(),
 				onToggleMenu: () => this.setState((s) => ({ menuOpen: !s.menuOpen })),
 				onSetting: (key, value) => this.updateSetting(key, value),
+				onBgLive: (key, value) => this.previewBg(key, value),
 				onClearCache: () => {
 					LXTranslate.clearCache();
 					this.retranslate();
@@ -725,7 +794,7 @@ class LyricsApp extends react.Component {
 					this.setState({ menuOpen: false });
 				},
 			}),
-			LXUi.nowPlaying(info)
+			LXUi.nowPlaying(info, { hidden: settings["focus-mode"] && !chromeVisible })
 		);
 	}
 }

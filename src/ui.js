@@ -23,6 +23,7 @@ const LXUi = (() => {
 		translate: () => svg(["M4 5h7M8 3v2M10.5 5S9.5 9.5 7 12.5 3 15 3 15", "M6 12s2 2.5 4.5 2.5", "M13 20l4-9 4 9M14.6 16.5h4.8"]),
 		expand: () => svg(["M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"]),
 		collapse: () => svg(["M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"]),
+		focus: () => svg(["M12 2v3M12 19v3M2 12h3M19 12h3", "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7"]),
 		gear: () => svg(["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6", "M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"]),
 		music: () => svg(["M9 18V5l12-2v13", "M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0M21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0"]),
 		alert: () => svg(["M12 9v4M12 17h.01", "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"]),
@@ -64,11 +65,50 @@ const LXUi = (() => {
 		);
 	}
 
+	function selectRow(label, value, options, onChange) {
+		return h(
+			"label",
+			{ className: "lx-pop__row lx-pop__row--select" },
+			h("span", { className: "lx-pop__label" }, label),
+			h(
+				"select",
+				{ className: "lx-pop__select", value, "aria-label": label, onChange: (e) => onChange(e.target.value) },
+				options.map(([v, l]) => h("option", { key: v, value: v }, l))
+			)
+		);
+	}
+
+	/* Uncontrolled range so a drag never triggers React re-renders. `onLive`
+	 * fires on every input event (the caller previews via a CSS variable, no
+	 * setState); `onCommit` fires on release / blur to persist + sync state. */
+	function rangeRow(label, value, onLive, onCommit) {
+		const commit = (e) => onCommit(Number(e.currentTarget.value));
+		return h(
+			"label",
+			{ className: "lx-pop__row lx-pop__row--range" },
+			h("span", { className: "lx-pop__label" }, label),
+			h("input", {
+				type: "range",
+				className: "lx-pop__range",
+				min: 0,
+				max: 100,
+				step: 1,
+				defaultValue: value,
+				"aria-label": label,
+				onChange: (e) => onLive(Number(e.target.value)),
+				onPointerUp: commit,
+				onKeyUp: commit,
+				onBlur: commit,
+			})
+		);
+	}
+
 	function settingsPopover(p) {
 		if (!p.open) return null;
 		const s = p.settings;
 		const d = p.diagnostics || {};
 		const ts = d.translation || { text: "", tone: "muted" };
+		const bg = (key) => (v) => p.onSetting(key, v);
 
 		return h(
 			"div",
@@ -76,21 +116,7 @@ const LXUi = (() => {
 
 			h("p", { className: "lx-pop__title" }, "Translation"),
 			switchRow("Enable translation", s["translate-enabled"], (v) => p.onSetting("translate-enabled", v)),
-			h(
-				"label",
-				{ className: "lx-pop__row lx-pop__row--select" },
-				h("span", { className: "lx-pop__label" }, "Language"),
-				h(
-					"select",
-					{
-						className: "lx-pop__select",
-						value: s["translate-lang"],
-						"aria-label": "Translation language",
-						onChange: (e) => p.onLang(e.target.value),
-					},
-					LXSettings.LANGUAGES.map(([code, name]) => h("option", { key: code, value: code }, name))
-				)
-			),
+			selectRow("Language", s["translate-lang"], LXSettings.LANGUAGES, p.onLang),
 			s["translate-enabled"]
 				? h(
 						"p",
@@ -116,11 +142,15 @@ const LXUi = (() => {
 				(v) => p.onSetting("karaoke", v),
 				d.wordSyncPossible ? "Active for this track" : "Uses Netease word timing"
 			),
+			switchRow("Focus Mode", s["focus-mode"], (v) => p.onSetting("focus-mode", v), "Minimal, immersive"),
 
 			h("div", { className: "lx-pop__divider" }),
-			h("p", { className: "lx-pop__title" }, "Appearance"),
-			switchRow("Ambient background motion", s.ambient, (v) => p.onSetting("ambient", v)),
-			switchRow("Auto-hide these controls", s.autohide, (v) => p.onSetting("autohide", v)),
+			h("p", { className: "lx-pop__title" }, "Background"),
+			selectRow("Style", s["bg-style"], LXSettings.BG_STYLES, bg("bg-style")),
+			s["bg-style"] === "artwork" ? rangeRow("Blur strength", s["bg-blur"], (v) => p.onBgLive("bg-blur", v), bg("bg-blur")) : null,
+			rangeRow("Background dim", s["bg-dim"], (v) => p.onBgLive("bg-dim", v), bg("bg-dim")),
+			selectRow("Animation", s["bg-anim"], LXSettings.ANIM_LEVELS, bg("bg-anim")),
+			switchRow("Auto-hide controls", s.autohide, (v) => p.onSetting("autohide", v)),
 
 			h("div", { className: "lx-pop__divider" }),
 			d.source
@@ -143,7 +173,11 @@ const LXUi = (() => {
 				active: s["translate-enabled"],
 				busy: !!props.busy,
 			}),
-			iconButton(props.immersive ? "collapse" : "expand", props.immersive ? "Exit immersive mode" : "Immersive mode", props.onImmersive, {
+			iconButton("focus", s["focus-mode"] ? "Exit Focus Mode" : "Focus Mode", props.onToggleFocus, {
+				toggle: true,
+				active: s["focus-mode"],
+			}),
+			iconButton(props.immersive ? "collapse" : "expand", props.immersive ? "Exit fullscreen" : "Fullscreen", props.onImmersive, {
 				toggle: true,
 				active: props.immersive,
 			}),
@@ -156,6 +190,7 @@ const LXUi = (() => {
 					settings: s,
 					diagnostics: props.diagnostics,
 					onSetting: props.onSetting,
+					onBgLive: props.onBgLive,
 					onLang: props.onLang,
 					onClearCache: props.onClearCache,
 					onReload: props.onReload,
@@ -166,11 +201,12 @@ const LXUi = (() => {
 
 	/* ---------------------------------------------------------- now playing  */
 
-	function nowPlaying(info) {
+	function nowPlaying(info, opts) {
 		if (!info) return null;
+		const o = opts || {};
 		return h(
 			"div",
-			{ className: "lx-now" },
+			{ className: "lx-now" + (o.hidden ? " lx-now--hidden" : ""), "aria-hidden": o.hidden ? "true" : undefined },
 			info.image
 				? h("img", { className: "lx-now__art", src: info.image, alt: "", draggable: "false" })
 				: h("div", { className: "lx-now__art lx-now__art--empty" }, ICONS.music()),

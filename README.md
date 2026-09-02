@@ -22,29 +22,37 @@ sits on the same reading line.
   The active line fills token by token in time with the vocal — completed
   words lit, the current word filling left to right, upcoming words muted.
   Falls back cleanly to line-level sync when word timing isn't available.
+- **Karaoke Focus Mode** — an optional minimal view: the active line jumps up
+  in size and contrast, the two neighbours stay readable, everything else
+  fades out, and the chrome (controls, now-playing) recedes and auto-hides.
+  Word/syllable sync, translation and line-sync fallback all still work. An
+  opt-in fullscreen action sits next to it; Focus Mode never enters
+  fullscreen on its own, and exiting fullscreen keeps Focus Mode on.
 - **A redesigned view, not a reskin.** One large active line, distance-based
   opacity and blur falloff for everything else, and a hair-thin underline that
   fills as playback moves toward the next line.
 - **Smooth, GPU-friendly transitions.** The column is moved with a single
   eased `transform`; lines animate only `opacity`, `filter` and `transform`.
   No per-frame layout, no scroll jank.
-- **Dynamic artwork background.** Blurred cover art, an album-derived accent
-  and gradient, and a fixed dark scrim so the lyrics stay readable no matter
-  what the cover looks like. Optional slow ambient drift.
+- **Background you can tune** — three styles (blurred artwork, an album-derived
+  dynamic gradient, or a plain solid), plus blur strength, background dim
+  (with a hard floor so lyrics stay readable) and a four-step animation
+  intensity. Defaults reproduce the original look exactly.
 - **Translation underneath each line.** The original text is never replaced —
   the translation sits below it in smaller, dimmer type and moves with its
   line (karaoke line included). Korean, Japanese and Chinese lyrics keep their
   original script; no romanization.
 - **In-view settings.** A gear button, top right, opens a small panel:
-  translation on/off, target language, provider and status, clear cache, the
-  karaoke toggle, and the lyric source / sync quality for the current track.
+  translation on/off, target language, provider and status, clear cache,
+  karaoke word-sync and Focus Mode, the three background settings, auto-hide,
+  and the lyric source / sync quality for the current track.
 - **Theme compatibility.** Chrome (controls, now-playing) uses Spotify's
   semantic variables, so it follows the active theme — default Spotify,
   third-party themes and [kpop-theme](https://github.com/Chrisss666/kpop-theme).
-- **`prefers-reduced-motion` support** — decorative animation, ambient drift
-  and the progress underline switch off, and the column jumps instead of
-  gliding. Karaoke word-fill stays (it's information, not decoration) but
-  loses its glow.
+- **`prefers-reduced-motion` support** — decorative animation, background
+  drift and the progress underline switch off (it overrides the animation
+  setting, even "High"), and the column jumps instead of gliding. Karaoke
+  word-fill stays (it's information, not decoration) but loses its glow.
 - **Graceful states** for loading, missing lyrics, instrumentals, podcasts /
   local files, network failure and translation errors. A translation or
   artwork failure never stops the lyrics.
@@ -204,6 +212,20 @@ for a language you switched away from — can never overwrite what's on screen.
 sets the active-word classes only when the word changes, and writes the
 `--word-progress` custom property straight to the DOM every frame — no React
 render per frame. `clip-path` on a stacked `.lx-word__fill` does the fill.
+
+**Focus Mode & background settings.** Both are CSS-driven. Focus Mode adds one
+class (`.lx-app--focus`) that widens the depth-of-field; the per-line opacity
+comes from `index.js` so the two neighbours stay readable and the rest fade.
+Background style and animation intensity are classes (`.lx-bg--*`,
+`.lx-anim-*`); blur, dim and drift multiplier are custom properties
+(`--lx-blur`, `--lx-dim`, `--lx-anim-mult`) that `applyBgVars()` sets only
+when a setting is committed. A slider drag previews through `previewBg()`,
+which writes the variable directly, coalesced to one write per animation
+frame — no `setState`, no per-frame render. Blur maps to ~0–72 px, dim has a
+0.33 floor so lyrics never lose contrast, `off` disables background motion,
+and `prefers-reduced-motion` overrides all of it. New settings live under the
+existing `404lyrics:setting:` prefix (`focus-mode`, `bg-style`, `bg-blur`,
+`bg-dim`, `bg-anim`); the old `ambient` boolean is migrated to `bg-anim`.
 
 **Top safe area.** The app mounts inside Spotify's main-view scroll node, and
 Spotify floats a translucent top bar over the first stretch of it. `index.js`

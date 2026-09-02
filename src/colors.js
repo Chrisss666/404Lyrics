@@ -78,9 +78,9 @@ const LXColors = (() => {
 		return rgbToHex(hslToRgb(hsl));
 	}
 
-	// Deep, slightly desaturated version of the artwork used for the ambient
-	// gradient. Kept dark on purpose: the scrim above it does the readability
-	// work, this only tints it.
+	// Deep, slightly desaturated version of the artwork used as the background
+	// base tint and the gradient. Kept dark on purpose: the scrim above it does
+	// the readability work, this only tints it.
 	function tuneBase(rgb) {
 		const hsl = rgbToHsl(rgb);
 		hsl.s = Math.min(0.5, hsl.s);

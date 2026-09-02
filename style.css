@@ -53,6 +53,12 @@
 	 * default so the controls never start under the bar. */
 	--lx-safe-top: 64px;
 
+	/* Background appearance - set from stored settings by index.js; these
+	 * defaults reproduce the original look before any setting is touched. */
+	--lx-blur: 50px;
+	--lx-dim: 0.58;
+	--lx-anim-mult: 1;
+
 	animation: lx-app-in 0.4s ease both;
 }
 
@@ -73,7 +79,11 @@
 	inset: 0;
 	z-index: 0;
 	overflow: hidden;
-	background: var(--lx-base);
+	background-color: var(--lx-base);
+	/* The base tint crossfades on track change (cheap - one solid colour). The
+	 * accent-driven gradient snaps, but its layer is re-keyed per palette in
+	 * index.js so it fades back in, which reads as a smooth colour shift. */
+	transition: background-color 0.55s ease;
 }
 
 /* The drifting wrapper carries the transform; the blurred image lives on a
@@ -95,9 +105,10 @@
 	background-image: inherit;
 	background-size: cover;
 	background-position: center;
-	filter: blur(50px) brightness(0.68) saturate(1.12);
+	filter: blur(var(--lx-blur, 50px)) brightness(0.68) saturate(1.12);
 	transform: scale(1.12);
 	animation: lx-art-in 0.8s ease both;
+	transition: filter 0.2s linear;
 }
 
 @keyframes lx-art-in {
@@ -106,16 +117,33 @@
 	}
 }
 
-.lx-bg--ambient .lx-bg__art {
-	animation: lx-drift 52s ease-in-out infinite alternate;
+/* Decorative drift - amplitude and speed scale with --lx-anim-mult (0 = Off,
+ * set by the Animation intensity setting). Killed entirely under Off and
+ * reduced motion. */
+.lx-anim-low .lx-bg--artwork .lx-bg__art,
+.lx-anim-normal .lx-bg--artwork .lx-bg__art,
+.lx-anim-high .lx-bg--artwork .lx-bg__art {
+	animation: lx-drift calc(52s / var(--lx-anim-mult, 1)) ease-in-out infinite alternate;
 }
 
 @keyframes lx-drift {
 	from {
-		transform: translate3d(-1.4%, 1%, 0);
+		transform: translate3d(calc(-1.4% * var(--lx-anim-mult, 1)), calc(1% * var(--lx-anim-mult, 1)), 0);
 	}
 	to {
-		transform: translate3d(1.6%, -1.4%, 0);
+		transform: translate3d(calc(1.6% * var(--lx-anim-mult, 1)), calc(-1.4% * var(--lx-anim-mult, 1)), 0);
+	}
+}
+
+.lx-anim-high .lx-bg--artwork .lx-bg__art::after {
+	animation:
+		lx-art-in 0.8s ease both,
+		lx-breath 34s ease-in-out infinite alternate;
+}
+
+@keyframes lx-breath {
+	to {
+		transform: scale(1.19);
 	}
 }
 
@@ -125,12 +153,61 @@
 	background:
 		radial-gradient(58% 52% at 16% 10%, color-mix(in srgb, var(--lx-accent) 26%, transparent), transparent 70%),
 		radial-gradient(66% 60% at 90% 92%, color-mix(in srgb, var(--lx-accent) 15%, transparent), transparent 72%);
+	animation: lx-art-in 0.6s ease both;
 }
 
+/* Readability scrim. A flat, --lx-dim-controlled tint (Background dim setting)
+ * plus a fixed bottom-weighted darkening for depth. The flat tint has a hard
+ * floor in the setting mapping so lyrics never lose contrast. */
 .lx-bg__scrim {
 	position: absolute;
 	inset: 0;
-	background: linear-gradient(180deg, rgba(6, 6, 10, 0.58), rgba(6, 6, 10, 0.7) 52%, rgba(6, 6, 10, 0.88));
+	background: rgba(6, 6, 10, var(--lx-dim, 0.58));
+	transition: background-color 0.2s linear;
+}
+
+.lx-bg__scrim::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(180deg, transparent 38%, rgba(5, 5, 9, 0.34));
+}
+
+/* ---- Dynamic Gradient: no artwork image, a richer multi-layer wash ---- */
+.lx-bg--gradient .lx-bg__art {
+	display: none;
+}
+
+.lx-bg--gradient .lx-bg__grad {
+	inset: -6%;
+	background:
+		radial-gradient(72% 62% at 14% 6%, color-mix(in srgb, var(--lx-accent) 46%, transparent), transparent 66%),
+		radial-gradient(78% 68% at 90% 96%, color-mix(in srgb, var(--lx-accent) 28%, transparent), transparent 70%),
+		linear-gradient(158deg, color-mix(in srgb, var(--lx-accent) 18%, var(--lx-base)), var(--lx-base) 60%);
+}
+
+.lx-anim-low .lx-bg--gradient .lx-bg__grad,
+.lx-anim-normal .lx-bg--gradient .lx-bg__grad,
+.lx-anim-high .lx-bg--gradient .lx-bg__grad {
+	animation:
+		lx-art-in 0.6s ease both,
+		lx-grad-drift calc(64s / var(--lx-anim-mult, 1)) ease-in-out infinite alternate;
+}
+
+@keyframes lx-grad-drift {
+	from {
+		transform: translate3d(calc(-2% * var(--lx-anim-mult, 1)), calc(-1.4% * var(--lx-anim-mult, 1)), 0) scale(1.04);
+	}
+	to {
+		transform: translate3d(calc(2.2% * var(--lx-anim-mult, 1)), calc(1.6% * var(--lx-anim-mult, 1)), 0) scale(1.08);
+	}
+}
+
+/* ---- Solid: dark, theme-safe base only (never --spice-main, which is white
+   under light themes and would break the near-white lyric text) ---- */
+.lx-bg--solid .lx-bg__art,
+.lx-bg--solid .lx-bg__grad {
+	display: none;
 }
 
 /* ───────────────────────────────────────── 3 · LYRIC COLUMN ─────────── */
@@ -359,6 +436,28 @@
 	}
 }
 
+/* ---- Karaoke Focus Mode ----
+ * A stronger version of the same depth-of-field: the whole column steps up in
+ * size, the active line is significantly larger and the size difference to
+ * neighbours widens - all via `transform: scale()` so line-to-line moves stay
+ * smooth. Per-line opacity comes from index.js (0.6 / 0.28 / 0 by distance) so
+ * the two visible neighbours stay readable while the rest fade out. */
+/* Size (with a viewport-height cap) is set in section 8 so it beats the plain
+ * immersive rule; here we widen the depth-of-field falloff. */
+.lx-app--focus .lx-line {
+	filter: blur(calc(var(--ad) * 1.4px));
+	transform: scale(calc(1 - var(--ad) * 0.16));
+}
+
+.lx-app--focus .lx-line--active {
+	filter: none;
+	transform: scale(1.12);
+}
+
+.lx-app--focus .lx-line__tr {
+	font-size: 0.4em;
+}
+
 /* ────────────────────────────────────── 5 · CONTROLS CLUSTER ────────── */
 
 .lx-controls {
@@ -382,6 +481,19 @@
 	opacity: 0;
 	transform: translateY(-6px);
 	pointer-events: none;
+}
+
+/* In Focus Mode the idle cluster fades to a faint hint rather than vanishing,
+ * and stays clickable - so the settings button is always reachable. Any hover
+ * or keyboard focus (or moving the mouse, handled in JS) brings it back. */
+.lx-app--focus .lx-controls--hidden {
+	opacity: 0.16;
+	transform: none;
+	pointer-events: auto;
+}
+
+.lx-app--focus .lx-controls--hidden:hover {
+	opacity: 1;
 }
 
 .lx-controls:focus-within {
@@ -503,13 +615,59 @@
 	color: #000;
 }
 
+.lx-pop__row--range {
+	cursor: default;
+	flex-wrap: wrap;
+	gap: 6px 12px;
+}
+
+.lx-pop__row--range:hover {
+	background: transparent;
+}
+
+.lx-pop__range {
+	flex: 1 1 100%;
+	width: 100%;
+	height: 4px;
+	margin: 4px 0 2px;
+	appearance: none;
+	-webkit-appearance: none;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	cursor: pointer;
+}
+
+.lx-pop__range::-webkit-slider-thumb {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 15px;
+	height: 15px;
+	border-radius: 50%;
+	background: #fff;
+	border: 0;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.lx-pop__range::-moz-range-thumb {
+	width: 15px;
+	height: 15px;
+	border: 0;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.lx-pop__range:focus-visible {
+	outline: 2px solid var(--lx-accent);
+	outline-offset: 4px;
+}
+
 .lx-pop__status {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	margin: 2px 6px 4px;
-	font-size: 0.76rem;
-	line-height: 1.4;
+	margin: 0 6px 3px;
+	font-size: 0.75rem;
+	line-height: 1.35;
 }
 
 .lx-pop__status--muted {
@@ -545,7 +703,7 @@
 }
 
 .lx-pop__title {
-	margin: 4px 6px 8px;
+	margin: 2px 6px 5px;
 	font-size: 0.72rem;
 	font-weight: 700;
 	letter-spacing: 0.08em;
@@ -559,13 +717,13 @@
 	justify-content: space-between;
 	gap: 12px;
 	width: 100%;
-	padding: 9px 6px;
+	padding: 7px 6px;
 	border: 0;
 	border-radius: 9px;
 	background: transparent;
 	color: var(--lx-ink);
 	font: inherit;
-	font-size: 0.86rem;
+	font-size: 0.85rem;
 	text-align: left;
 	cursor: pointer;
 }
@@ -617,13 +775,13 @@
 
 .lx-pop__divider {
 	height: 1px;
-	margin: 8px 6px;
+	margin: 6px 6px;
 	background: rgba(255, 255, 255, 0.1);
 }
 
 .lx-pop__action {
 	width: 100%;
-	padding: 9px;
+	padding: 8px;
 	border: 1px solid rgba(255, 255, 255, 0.14);
 	border-radius: 9px;
 	background: transparent;
@@ -638,9 +796,9 @@
 }
 
 .lx-pop__meta {
-	margin: 10px 6px 2px;
-	font-size: 0.74rem;
-	line-height: 1.4;
+	margin: 4px 6px 6px;
+	font-size: 0.73rem;
+	line-height: 1.35;
 	color: color-mix(in srgb, var(--lx-ink) 52%, transparent);
 }
 
@@ -656,6 +814,28 @@
 	gap: 14px;
 	max-width: 44vw;
 	font-family: var(--lx-ui-font);
+	transition: opacity 0.4s ease;
+}
+
+/* Focus Mode: the now-playing card is decorative here, so it drops to a low
+ * prominence and fades out with the rest of the chrome after a pause. Hover
+ * brings it back. */
+.lx-app--focus .lx-now {
+	opacity: 0.4;
+}
+
+.lx-app--focus .lx-now:hover {
+	opacity: 1;
+}
+
+.lx-now--hidden {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.lx-app--focus .lx-now--hidden:hover {
+	opacity: 1;
+	pointer-events: auto;
 }
 
 .lx-now::before {
@@ -769,6 +949,14 @@
 	font-size: clamp(2rem, 4vw, 3.5rem);
 }
 
+/* Focus Mode wins over plain immersive sizing when both are on, and stays
+ * height-capped (the min(..vh..)) so a long wrapped active line can't run off
+ * a short window. */
+.lx-app--focus.lx-app--immersive .lx-line,
+.lx-app--focus .lx-line {
+	font-size: clamp(1.85rem, min(4.6vw, 6vh), 3.9rem);
+}
+
 @media (min-width: 1800px) {
 	.lx-stage {
 		padding-inline: max(7rem, calc((100% - 1500px) / 2));
@@ -778,6 +966,10 @@
 @media (max-width: 640px) {
 	.lx-line {
 		font-size: clamp(1.3rem, 6vw, 1.9rem);
+	}
+	.lx-app--focus .lx-line,
+	.lx-app--focus.lx-app--immersive .lx-line {
+		font-size: clamp(1.5rem, min(7vw, 6vh), 2.4rem);
 	}
 	.lx-controls {
 		top: calc(var(--lx-safe-top, 64px) + 8px);
@@ -799,22 +991,32 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+	/* Overrides the Animation-intensity setting entirely - even "High" - so no
+	 * decorative background movement runs. Lyric and karaoke sync are untouched. */
 	.lx-app,
 	.lx-bg__art,
 	.lx-bg__art::after,
-	.lx-bg--ambient .lx-bg__art,
+	.lx-bg__grad,
 	.lx-line__text,
 	.lx-line__tr,
 	.lx-pop,
 	.lx-screen__pulse {
 		animation: none !important;
 	}
+	.lx-bg {
+		transition: background-color 0.25s ease !important;
+	}
+	.lx-bg__scrim,
+	.lx-bg__art::after {
+		transition: none !important;
+	}
 	.lx-lines,
 	.lx-line {
 		transition: opacity 0.001s linear, color 0.2s ease !important;
 	}
 	.lx-bg__art::after {
-		filter: blur(50px) brightness(0.66);
+		filter: blur(var(--lx-blur, 50px)) brightness(0.66);
+		transform: scale(1.12) !important;
 	}
 	.lx-pop__switch,
 	.lx-pop__switch::after {
