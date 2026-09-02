@@ -1,7 +1,27 @@
 {
     "name": "404Lyrics",
+    "description": "A beautiful, immersive lyrics experience for Spotify with karaoke-style word sync, translations and dynamic backgrounds.",
+
+    "preview": "preview.png",
+    "readme": "README.md",
+
+    "authors": [
+        {
+            "name": "Chrisss666",
+            "url": "https://github.com/Chrisss666"
+        }
+    ],
+
+    "tags": [
+        "lyrics",
+        "karaoke",
+        "translation"
+    ],
+
     "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 7h11M4 12h9M4 17h13\"/><circle cx=\"19\" cy=\"9\" r=\"2.4\"/></svg>",
+
     "active-icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"currentColor\"><path d=\"M4 6h10a1.2 1.2 0 0 1 0 2.4H4A1.2 1.2 0 0 1 4 6Zm0 4.8h8a1.2 1.2 0 0 1 0 2.4H4a1.2 1.2 0 0 1 0-2.4Zm0 4.8h11a1.2 1.2 0 0 1 0 2.4H4a1.2 1.2 0 0 1 0-2.4Z\"/><circle cx=\"19\" cy=\"9\" r=\"2.6\"/></svg>",
+
     "subfiles": [
         "src/net.js",
         "src/settings.js",
@@ -12,5 +32,8 @@
         "src/translate.js",
         "src/ui.js"
     ],
-    "subfiles_extension": ["extension.js"]
+
+    "subfiles_extension": [
+        "extension.js"
+    ]
 }
