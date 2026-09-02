@@ -1,0 +1,734 @@
+/* ════════════════════════════════════════════════════════════════════════
+   404Lyrics — a premium fullscreen lyrics experience for Spotify
+
+   Author:  Chrisss666
+   License: MIT (see LICENSE)
+   Repo:    https://github.com/Chrisss666/404Lyrics
+
+   Design
+   ------
+   The active line is the hero. Every other line recedes into a shallow
+   depth of field — opacity and blur fall off with distance from the
+   active line, and the whole column glides on one eased transform so the
+   active line always sits on a fixed reading line. The only thing moving
+   during a held line is a hair-thin progress underline.
+
+   Colour comes from the album artwork (accent + a deep tint for the
+   ambient gradient); a fixed dark scrim above the blurred artwork keeps
+   the near-white lyric text readable no matter what the cover looks like.
+
+   Sections:
+     1. Tokens & shell        5. Controls cluster
+     2. Background layers      6. Now playing
+     3. Lyric column          7. State screens
+     4. Lines & translation   8. Reduced motion & responsive
+   ════════════════════════════════════════════════════════════════════════ */
+
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap");
+
+/* ─────────────────────────────────────────── 1 · TOKENS & SHELL ───────── */
+
+.lx-app {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	isolation: isolate;
+	background: #09090c;
+	color: var(--lx-ink);
+
+	--lx-ink: #f3f2f7;
+	--lx-accent: #8b5cf6;
+	--lx-base: #14141c;
+
+	--lx-lyric-font: "Bricolage Grotesque", "Spotify Mix", var(--font-family, "Circular"), system-ui, -apple-system, sans-serif;
+	--lx-ui-font: var(--font-family, "Circular", system-ui, -apple-system, sans-serif);
+
+	--lx-glide: 620ms;
+	--lx-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+	animation: lx-app-in 0.4s ease both;
+}
+
+.lx-app--still {
+	--lx-glide: 0ms;
+}
+
+@keyframes lx-app-in {
+	from {
+		opacity: 0;
+	}
+}
+
+/* ─────────────────────────────────────── 2 · BACKGROUND LAYERS ───────── */
+
+.lx-bg {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	overflow: hidden;
+	background: var(--lx-base);
+}
+
+/* The drifting wrapper carries the transform; the blurred image lives on a
+ * child so its expensive raster is cached once and only translated, not
+ * re-sampled every frame. */
+.lx-bg__art {
+	position: absolute;
+	inset: -6%;
+	will-change: transform;
+}
+
+/* The image is set inline on .lx-bg__art (background-image); the ::after
+ * inherits it so the heavy blur is rasterised on a layer the drift transform
+ * only translates, never re-samples. */
+.lx-bg__art::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: inherit;
+	background-size: cover;
+	background-position: center;
+	filter: blur(50px) brightness(0.68) saturate(1.12);
+	transform: scale(1.12);
+	animation: lx-art-in 0.8s ease both;
+}
+
+@keyframes lx-art-in {
+	from {
+		opacity: 0;
+	}
+}
+
+.lx-bg--ambient .lx-bg__art {
+	animation: lx-drift 52s ease-in-out infinite alternate;
+}
+
+@keyframes lx-drift {
+	from {
+		transform: translate3d(-1.4%, 1%, 0);
+	}
+	to {
+		transform: translate3d(1.6%, -1.4%, 0);
+	}
+}
+
+.lx-bg__grad {
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(58% 52% at 16% 10%, color-mix(in srgb, var(--lx-accent) 26%, transparent), transparent 70%),
+		radial-gradient(66% 60% at 90% 92%, color-mix(in srgb, var(--lx-accent) 15%, transparent), transparent 72%);
+}
+
+.lx-bg__scrim {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(180deg, rgba(6, 6, 10, 0.58), rgba(6, 6, 10, 0.7) 52%, rgba(6, 6, 10, 0.88));
+}
+
+/* ───────────────────────────────────────── 3 · LYRIC COLUMN ─────────── */
+
+.lx-stage {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	padding-inline: clamp(1.25rem, 8vw, 7rem);
+	--lx-prog: 0;
+}
+
+.lx-lines {
+	flex: none;
+	align-self: stretch;
+	max-width: min(52rem, 78vw);
+	text-align: left;
+	transition: transform var(--lx-glide) var(--lx-ease);
+	will-change: transform;
+}
+
+.lx-lines--still {
+	transition: none;
+}
+
+/* Unsynced lyrics: a calm readable column, centred, scrollable, no motion. */
+.lx-lines--flow {
+	flex: 1 1 auto;
+	align-self: center;
+	min-height: 0;
+	max-width: min(44rem, 82vw);
+	margin: auto;
+	padding-block: 12vh;
+	max-height: 100%;
+	overflow-y: auto;
+	transform: none !important;
+	transition: none;
+	scrollbar-width: thin;
+}
+
+/* ──────────────────────────────────── 4 · LINES & TRANSLATION ───────── */
+
+.lx-line {
+	--ad: 0;
+	--step: 0.13;
+	position: relative;
+	display: block;
+	margin-block: 0.34em;
+	font-family: var(--lx-lyric-font);
+	font-size: clamp(1.7rem, 3.5vw, 3rem);
+	line-height: 1.18;
+	letter-spacing: -0.02em;
+	color: var(--lx-ink);
+	/* Distant lines fade, but never below a readable floor - the brief asks
+	 * for de-emphasis, not invisibility. Lines past ~14 away are hidden
+	 * outright from JS so this floor only covers what is actually on screen. */
+	opacity: max(0.32, calc(1 - var(--ad) * var(--step)));
+	filter: blur(calc(var(--ad) * 0.72px));
+	transform: scale(calc(1 - var(--ad) * 0.02));
+	transform-origin: left center;
+	transition:
+		opacity 0.45s ease,
+		filter 0.45s ease,
+		transform 0.45s var(--lx-ease),
+		color 0.4s ease;
+}
+
+.lx-line--past {
+	--step: 0.13;
+}
+
+.lx-line--active {
+	opacity: 1;
+	filter: none;
+	transform: scale(1.03);
+	color: #fff;
+}
+
+.lx-line__text {
+	display: block;
+	font-size: 1em;
+	font-weight: 600;
+}
+
+.lx-line--active .lx-line__text {
+	font-weight: 680;
+	text-shadow:
+		0 2px 34px rgba(0, 0, 0, 0.45),
+		0 0 32px color-mix(in srgb, var(--lx-accent) 52%, transparent);
+}
+
+.lx-line__tr {
+	display: block;
+	margin-top: 0.34em;
+	font-size: 0.44em;
+	font-weight: 450;
+	line-height: 1.32;
+	letter-spacing: -0.01em;
+	color: color-mix(in srgb, var(--lx-ink) 60%, transparent);
+}
+
+.lx-line--active .lx-line__tr {
+	color: color-mix(in srgb, #fff 78%, transparent);
+}
+
+/* Hair-thin time progress underline — the one moving element on a held line. */
+.lx-line__bar {
+	display: block;
+	position: relative;
+	margin-top: 0.5em;
+	width: clamp(52px, 11vw, 132px);
+	height: 2px;
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--lx-ink) 14%, transparent);
+	overflow: hidden;
+}
+
+.lx-line__bar::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	transform-origin: left center;
+	transform: scaleX(var(--lx-prog, 0));
+	background: var(--lx-accent);
+	box-shadow: 0 0 10px color-mix(in srgb, var(--lx-accent) 80%, transparent);
+}
+
+/* Seek affordance */
+.lx-line[role="button"] {
+	cursor: pointer;
+}
+
+.lx-line[role="button"]:hover {
+	opacity: 1;
+}
+
+.lx-line[role="button"]:hover .lx-line__text {
+	text-shadow: 0 0 22px color-mix(in srgb, var(--lx-accent) 34%, transparent);
+}
+
+.lx-line:focus-visible {
+	outline: none;
+}
+
+.lx-line:focus-visible .lx-line__text {
+	outline: 2px solid var(--lx-accent);
+	outline-offset: 5px;
+	border-radius: 3px;
+}
+
+/* Flow (unsynced) overrides */
+.lx-lines--flow .lx-line {
+	margin-block: 0.62em;
+	font-size: clamp(1.05rem, 2vw, 1.45rem);
+	opacity: 0.82;
+	filter: none;
+	transform: none;
+	cursor: default;
+}
+
+.lx-lines--flow .lx-line__tr {
+	font-size: 0.66em;
+}
+
+/* Entrance: staggered on the text spans so it never fights the line's own
+ * depth-of-field transform. Replays on track change (the list is re-keyed). */
+.lx-lines:not(.lx-lines--still) .lx-line__text,
+.lx-lines:not(.lx-lines--still) .lx-line__tr {
+	animation: lx-rise 0.5s var(--lx-ease) both;
+	animation-delay: calc(min(var(--ad), 8) * 45ms);
+}
+
+@keyframes lx-rise {
+	from {
+		opacity: 0;
+		transform: translateY(13px);
+	}
+}
+
+/* ────────────────────────────────────── 5 · CONTROLS CLUSTER ────────── */
+
+.lx-controls {
+	position: absolute;
+	top: clamp(14px, 3vh, 28px);
+	right: clamp(14px, 3vw, 32px);
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-family: var(--lx-ui-font);
+	transition:
+		opacity 0.35s ease,
+		transform 0.35s ease;
+}
+
+.lx-controls--hidden {
+	opacity: 0;
+	transform: translateY(-6px);
+	pointer-events: none;
+}
+
+.lx-controls:focus-within {
+	opacity: 1;
+	transform: none;
+	pointer-events: auto;
+}
+
+.lx-ctl {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	width: 38px;
+	height: 38px;
+	padding: 0;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 999px;
+	background: rgba(18, 18, 24, 0.44);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+	color: var(--lx-ink);
+	cursor: pointer;
+	transition:
+		background 0.2s ease,
+		border-color 0.2s ease,
+		color 0.2s ease,
+		transform 0.15s ease;
+}
+
+.lx-ctl:hover {
+	background: rgba(42, 42, 52, 0.6);
+	transform: translateY(-1px);
+}
+
+.lx-ctl:focus-visible {
+	outline: 2px solid var(--lx-accent);
+	outline-offset: 2px;
+}
+
+.lx-ctl--active {
+	background: color-mix(in srgb, var(--lx-accent) 24%, rgba(18, 18, 24, 0.5));
+	border-color: color-mix(in srgb, var(--lx-accent) 52%, transparent);
+	color: #fff;
+}
+
+.lx-ctl__spinner {
+	position: absolute;
+	inset: 5px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	border-top-color: currentColor;
+	animation: lx-spin 0.7s linear infinite;
+}
+
+@keyframes lx-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.lx-lang {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 38px;
+	padding: 0 10px;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 999px;
+	background: rgba(18, 18, 24, 0.44);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+	color: var(--lx-ink);
+}
+
+.lx-lang__select {
+	appearance: none;
+	-webkit-appearance: none;
+	max-width: 128px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+.lx-lang__select:focus-visible {
+	outline: 2px solid var(--lx-accent);
+	outline-offset: 3px;
+	border-radius: 4px;
+}
+
+.lx-lang__select option {
+	color: #000;
+}
+
+.lx-controls__menu {
+	position: relative;
+}
+
+.lx-pop {
+	position: absolute;
+	top: calc(100% + 10px);
+	right: 0;
+	width: 270px;
+	padding: 12px;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 16px;
+	background: rgba(15, 15, 21, 0.9);
+	backdrop-filter: blur(26px);
+	-webkit-backdrop-filter: blur(26px);
+	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+	animation: lx-pop 0.18s ease both;
+}
+
+@keyframes lx-pop {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+}
+
+.lx-pop__title {
+	margin: 4px 6px 8px;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: color-mix(in srgb, var(--lx-ink) 55%, transparent);
+}
+
+.lx-pop__row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	padding: 9px 6px;
+	border: 0;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--lx-ink);
+	font: inherit;
+	font-size: 0.86rem;
+	text-align: left;
+	cursor: pointer;
+}
+
+.lx-pop__row:hover {
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.lx-pop__label {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.lx-pop__hint {
+	font-size: 0.74rem;
+	color: color-mix(in srgb, var(--lx-ink) 52%, transparent);
+}
+
+.lx-pop__switch {
+	flex: none;
+	width: 34px;
+	height: 20px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	transition: background 0.2s ease;
+	position: relative;
+}
+
+.lx-pop__switch::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: #fff;
+	transition: transform 0.2s var(--lx-ease);
+}
+
+.lx-pop__switch.is-on {
+	background: var(--lx-accent);
+}
+
+.lx-pop__switch.is-on::after {
+	transform: translateX(14px);
+}
+
+.lx-pop__divider {
+	height: 1px;
+	margin: 8px 6px;
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.lx-pop__action {
+	width: 100%;
+	padding: 9px;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 9px;
+	background: transparent;
+	color: var(--lx-ink);
+	font: inherit;
+	font-size: 0.84rem;
+	cursor: pointer;
+}
+
+.lx-pop__action:hover {
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.lx-pop__meta {
+	margin: 10px 6px 2px;
+	font-size: 0.74rem;
+	line-height: 1.4;
+	color: color-mix(in srgb, var(--lx-ink) 52%, transparent);
+}
+
+/* ───────────────────────────────────────── 6 · NOW PLAYING ─────────── */
+
+.lx-now {
+	position: absolute;
+	left: clamp(1.25rem, 8vw, 7rem);
+	bottom: clamp(16px, 4vh, 38px);
+	z-index: 4;
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	max-width: 44vw;
+	font-family: var(--lx-ui-font);
+}
+
+.lx-now::before {
+	content: "";
+	position: absolute;
+	inset: -30px -60px -30px -40px;
+	z-index: -1;
+	background: radial-gradient(60% 120% at 12% 50%, rgba(4, 4, 8, 0.55), transparent 75%);
+	pointer-events: none;
+}
+
+.lx-now__art {
+	flex: none;
+	width: 56px;
+	height: 56px;
+	border-radius: 10px;
+	object-fit: cover;
+	box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+
+.lx-now__art--empty {
+	display: grid;
+	place-items: center;
+	background: rgba(255, 255, 255, 0.08);
+	color: color-mix(in srgb, var(--lx-ink) 55%, transparent);
+}
+
+.lx-now__meta {
+	min-width: 0;
+}
+
+.lx-now__title,
+.lx-now__artist {
+	margin: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.lx-now__title {
+	font-weight: 700;
+	font-size: 0.98rem;
+}
+
+.lx-now__artist {
+	margin-top: 2px;
+	font-size: 0.85rem;
+	color: color-mix(in srgb, var(--lx-ink) 64%, transparent);
+}
+
+/* ──────────────────────────────────────── 7 · STATE SCREENS ────────── */
+
+.lx-screen {
+	margin: auto;
+	max-width: 30rem;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	text-align: center;
+	z-index: 2;
+}
+
+.lx-screen__mark {
+	display: grid;
+	place-items: center;
+	width: 52px;
+	height: 52px;
+	border-radius: 50%;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	color: var(--lx-ink);
+}
+
+.lx-screen__pulse {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--lx-accent);
+	animation: lx-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes lx-pulse {
+	0%,
+	100% {
+		opacity: 0.3;
+		transform: scale(0.8);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1.15);
+	}
+}
+
+.lx-screen__title {
+	margin: 0;
+	font-family: var(--lx-lyric-font);
+	font-size: clamp(1.35rem, 3vw, 1.95rem);
+	font-weight: 640;
+	letter-spacing: -0.02em;
+}
+
+.lx-screen__body {
+	margin: 0;
+	line-height: 1.5;
+	color: color-mix(in srgb, var(--lx-ink) 62%, transparent);
+}
+
+/* ─────────────────────────────── 8 · REDUCED MOTION & RESPONSIVE ───── */
+
+.lx-app--immersive .lx-line {
+	font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+@media (min-width: 1800px) {
+	.lx-stage {
+		padding-inline: max(7rem, calc((100% - 1500px) / 2));
+	}
+}
+
+@media (max-width: 640px) {
+	.lx-line {
+		font-size: clamp(1.3rem, 6vw, 1.9rem);
+	}
+	.lx-controls {
+		top: 10px;
+		right: 10px;
+		gap: 6px;
+	}
+	.lx-lang__select {
+		max-width: 88px;
+	}
+	.lx-now {
+		max-width: 72vw;
+	}
+}
+
+@media (max-width: 420px) {
+	.lx-now__art {
+		display: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lx-app,
+	.lx-bg__art,
+	.lx-bg__art::after,
+	.lx-bg--ambient .lx-bg__art,
+	.lx-line__text,
+	.lx-line__tr,
+	.lx-pop,
+	.lx-screen__pulse {
+		animation: none !important;
+	}
+	.lx-lines,
+	.lx-line {
+		transition: opacity 0.001s linear, color 0.2s ease !important;
+	}
+	.lx-bg__art::after {
+		filter: blur(50px) brightness(0.66);
+	}
+	.lx-pop__switch,
+	.lx-pop__switch::after {
+		transition: none;
+	}
+	/* The underline fills per frame; that is the one bit of motion worth
+	 * dropping entirely when the user has asked for less of it. */
+	.lx-line__bar {
+		display: none;
+	}
+}

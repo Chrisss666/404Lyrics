@@ -1,0 +1,10 @@
+# This app has no build step - nothing here is generated.
+# Only editor and OS noise is ignored.
+
+.vscode/
+.idea/
+*.code-workspace
+
+Thumbs.db
+desktop.ini
+.DS_Store
