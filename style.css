@@ -298,11 +298,21 @@
 	font-weight: 600;
 }
 
+/* Active line: a dark drop shadow only, for legibility over bright artwork.
+ * The accent highlight is a tight glyph-hugging halo, and it lives on ONE
+ * layer per mode so the glows never stack into a rectangular haze:
+ *   - plain line-sync  -> the halo is on the line text (rule below)
+ *   - karaoke lines     -> the halo is on the sung words instead */
 .lx-line--active .lx-line__text {
 	font-weight: 680;
+	text-shadow: 0 2px 18px rgba(0, 0, 0, 0.42);
+}
+
+.lx-line--active .lx-line__text:not(.lx-line__text--kara) {
 	text-shadow:
-		0 2px 34px rgba(0, 0, 0, 0.45),
-		0 0 32px color-mix(in srgb, var(--lx-accent) 52%, transparent);
+		0 2px 18px rgba(0, 0, 0, 0.42),
+		0 0 4px color-mix(in srgb, var(--lx-accent) 26%, transparent),
+		0 0 10px color-mix(in srgb, var(--lx-accent) 11%, transparent);
 }
 
 /* ---- karaoke: word-by-word fill on the active line ----
@@ -329,7 +339,11 @@
 	white-space: pre;
 	pointer-events: none;
 	clip-path: inset(0 100% 0 0);
-	text-shadow: 0 0 26px color-mix(in srgb, var(--lx-accent) 60%, transparent);
+	/* Tight enough to hug the glyph edges - no cloud, and small enough that the
+	 * clip edge on a half-filled word shows no hard band. */
+	text-shadow:
+		0 0 1px color-mix(in srgb, var(--lx-accent) 40%, transparent),
+		0 0 4px color-mix(in srgb, var(--lx-accent) 16%, transparent);
 }
 
 .lx-word--done {
@@ -342,6 +356,10 @@
 
 .lx-word--active .lx-word__fill {
 	clip-path: inset(0 calc(100% - var(--wp) * 100%) 0 0);
+	/* current word: a touch brighter than completed words, not more blurred */
+	text-shadow:
+		0 0 1px color-mix(in srgb, var(--lx-accent) 50%, transparent),
+		0 0 5px color-mix(in srgb, var(--lx-accent) 22%, transparent);
 }
 
 .lx-word--soon {
@@ -381,7 +399,7 @@
 	transform-origin: left center;
 	transform: scaleX(var(--lx-prog, 0));
 	background: var(--lx-accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--lx-accent) 80%, transparent);
+	box-shadow: 0 0 5px color-mix(in srgb, var(--lx-accent) 65%, transparent);
 }
 
 /* Seek affordance */
@@ -394,7 +412,9 @@
 }
 
 .lx-line[role="button"]:hover .lx-line__text {
-	text-shadow: 0 0 22px color-mix(in srgb, var(--lx-accent) 34%, transparent);
+	text-shadow:
+		0 0 4px color-mix(in srgb, var(--lx-accent) 24%, transparent),
+		0 0 9px color-mix(in srgb, var(--lx-accent) 10%, transparent);
 }
 
 .lx-line:focus-visible {
@@ -1032,8 +1052,12 @@
 	.lx-word {
 		transition: none;
 	}
-	.lx-word__fill {
+	.lx-word__fill,
+	.lx-word--active .lx-word__fill {
 		text-shadow: none;
+	}
+	.lx-line--active .lx-line__text:not(.lx-line__text--kara) {
+		text-shadow: 0 2px 18px rgba(0, 0, 0, 0.42);
 	}
 	.lx-pop__dot {
 		animation: none;
