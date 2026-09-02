@@ -1,17 +1,39 @@
-# 404Lyrics
+<p align="center">
+  <img src="https://shieldcn.dev/header/gradient.svg?title=404Lyrics&subtitle=An+immersive+Spicetify+lyrics+experience+with+karaoke%2C+translations+and+dynamic+backgrounds&mode=dark&font=geist">
+</p>
 
-A [Spicetify](https://spicetify.app) custom app that replaces Spotify's Lyrics
-view with a premium, fullscreen lyrics experience — synced line by line,
-translated underneath, on a background painted from the album art.
+<br>
 
-> **[Portfolio](https://404brainnotfound.at)** ·
-> [Other projects](https://404brainnotfound.at/en/projects/)
+<p align="center">
+  <b>A beautiful, immersive replacement for Spotify's standard lyrics experience.</b>
+</p>
 
-It keeps the one thing Spotify's lyrics get right — accurate synced timing,
-pulled from the same source Spotify itself uses — and rebuilds everything
-around it: the active line is the focus of the screen, the rest recede into a
-shallow depth of field, and the whole column glides so the current line always
-sits on the same reading line.
+<p align="center">
+  Word-synced karaoke · Line translations · Dynamic backgrounds · Focus Mode
+</p>
+
+<p align="center">
+  <a href="https://404brainnotfound.at">Portfolio</a>
+  ·
+  <a href="https://404brainnotfound.at/en/projects/">Other projects</a>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="preview.png" alt="404Lyrics Preview" width="900">
+</p>
+
+<br>
+
+404Lyrics replaces Spotify's standard Lyrics view with a polished fullscreen
+experience built around synchronized lyrics. The active line stays in focus
+while surrounding lyrics fade into the background, with optional word-by-word
+karaoke timing, translations underneath each line, dynamic album-based
+backgrounds and a distraction-free Focus Mode.
+
+Everything runs locally inside Spicetify, with graceful fallbacks when a track
+doesn't provide word-level or synchronized lyrics.
 
 ## Features
 
