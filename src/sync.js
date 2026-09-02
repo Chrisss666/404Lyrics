@@ -40,5 +40,40 @@ const LXSync = (() => {
 		return frac < 0 ? 0 : frac > 1 ? 1 : frac;
 	}
 
-	return { activeIndex, lineProgress };
+	/* ---- word-level (karaoke) ---- */
+
+	// Index of the currently-sung word within a line's `words` array, or -1
+	// before the first word. `words` are sorted ascending by `time`.
+	function activeWord(words, positionMs) {
+		if (!words || !words.length) return -1;
+		if (positionMs < (words[0].time || 0)) return -1;
+		let lo = 0;
+		let hi = words.length - 1;
+		let result = 0;
+		while (lo <= hi) {
+			const mid = (lo + hi) >> 1;
+			if ((words[mid].time || 0) <= positionMs) {
+				result = mid;
+				lo = mid + 1;
+			} else {
+				hi = mid - 1;
+			}
+		}
+		return result;
+	}
+
+	// 0..1 fill of the active word. Uses the word's own end time, falling back
+	// to the next word's start, then a short ramp. Clamped so a word that has
+	// already ended reads as full and the next has not started early.
+	function wordProgress(words, index, positionMs) {
+		if (index < 0 || !words || !words[index]) return 0;
+		const w = words[index];
+		const start = w.time || 0;
+		let end = w.endTime || (words[index + 1] ? words[index + 1].time : start + 400);
+		if (end <= start) end = start + 120;
+		const frac = (positionMs - start) / (end - start);
+		return frac < 0 ? 0 : frac > 1 ? 1 : frac;
+	}
+
+	return { activeIndex, lineProgress, activeWord, wordProgress };
 })();

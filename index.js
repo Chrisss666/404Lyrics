@@ -39,9 +39,10 @@ function BgLayer(props) {
 /* ------------------------------------------------------------- lyric list */
 
 function Lines(props) {
-	const { data, translations, activeIndex, showTranslations, onSeek, reduceMotion } = props;
+	const { data, translations, activeIndex, showTranslations, onSeek, reduceMotion, wordsRef } = props;
 	const linesRef = react.useRef(null);
-	const synced = data.kind === "synced";
+	const karaoke = data.kind === "richsync";
+	const synced = data.kind === "synced" || karaoke;
 	const anchor = activeIndex < 0 ? 0 : activeIndex;
 
 	// Keep the active line on a fixed reading line (~42% down the stage) by
@@ -65,6 +66,25 @@ function Lines(props) {
 		const isActive = synced && i === activeIndex;
 		const seekable = synced && Number.isFinite(line.time) && line.time > 0;
 		const tr = showTranslations ? translations[text] : null;
+		const showWords = karaoke && isActive && Array.isArray(line.words) && line.words.length > 0;
+
+		// The active karaoke line renders one span per word (base + fill
+		// overlay); every other line stays a single plain span so only ~1 line
+		// ever holds the extra DOM.
+		const textNode = showWords
+			? react.createElement(
+					"span",
+					{ className: "lx-line__text lx-line__text--kara", ref: wordsRef },
+					line.words.map((w, wi) =>
+						react.createElement(
+							"span",
+							{ key: wi, className: "lx-word" },
+							react.createElement("span", { className: "lx-word__base" }, w.text),
+							react.createElement("span", { className: "lx-word__fill", "aria-hidden": "true" }, w.text)
+						)
+					)
+				)
+			: react.createElement("span", { className: "lx-line__text" }, text || "♪");
 
 		const handlers = seekable
 			? {
@@ -95,7 +115,7 @@ function Lines(props) {
 				},
 				handlers
 			),
-			react.createElement("span", { className: "lx-line__text" }, text || "♪"),
+			textNode,
 			tr ? react.createElement("span", { className: "lx-line__tr", lang: props.targetLang }, tr) : null,
 			isActive && seekable ? react.createElement("span", { className: "lx-line__bar", "aria-hidden": "true" }) : null
 		);
@@ -113,7 +133,7 @@ function Lines(props) {
 
 /* --------------------------------------------------------------- the app */
 
-const EMPTY_TRANSLATIONS = { map: {}, status: "idle" };
+const EMPTY_TRANSLATIONS = { map: {}, status: "idle", detected: "" };
 
 class LyricsApp extends react.Component {
 	constructor(props) {
@@ -129,25 +149,32 @@ class LyricsApp extends react.Component {
 			menuOpen: false,
 			controlsVisible: true,
 			reduceMotion: false,
+			translationProvider: "",
 			settings: {
 				"translate-enabled": LXSettings.get("translate-enabled"),
 				"translate-lang": LXSettings.get("translate-lang"),
+				karaoke: LXSettings.get("karaoke"),
 				ambient: LXSettings.get("ambient"),
 				autohide: LXSettings.get("autohide"),
 			},
 		};
 
-		this.token = 0;
+		this.token = 0; // track identity - bumped on every song change / re-fetch
+		this.tToken = 0; // translation-batch identity - bumped on every (re)translate
 		this.lyricsAbort = null;
 		this.translateAbort = null;
 		this._mounted = false;
 		this._clockIdle = false;
 		this._oneMoreTick = false;
+		this._wi = -2; // last rendered active-word index (karaoke)
+		this._wc = null; // word container the classes were last written to
 		this.raf = 0;
 		this.hideTimer = 0;
+		this._translatedThisEnable = false;
 
 		this.rootRef = react.createRef();
 		this.stageRef = react.createRef();
+		this.wordsRef = react.createRef();
 
 		this.onSong = this.onSong.bind(this);
 		this.onProgress = this.onProgress.bind(this);
@@ -226,16 +253,44 @@ class LyricsApp extends react.Component {
 
 	tickClock() {
 		const { data } = this.state;
-		if (!data || data.kind !== "synced" || !data.lines.length) return;
+		if (!data || !data.lines.length || (data.kind !== "synced" && data.kind !== "richsync")) return;
 
 		const pos = LXPlayer.progress();
 		const idx = LXSync.activeIndex(data.lines, pos);
-		if (idx !== this.state.activeIndex) this.safeSetState({ activeIndex: idx });
 
 		if (this.stageRef.current) {
-			const frac = LXSync.lineProgress(data.lines, idx, pos);
-			this.stageRef.current.style.setProperty("--lx-prog", frac.toFixed(3));
+			this.stageRef.current.style.setProperty("--lx-prog", LXSync.lineProgress(data.lines, idx, pos).toFixed(3));
 		}
+
+		if (idx !== this.state.activeIndex) {
+			// Line changed: let React move the active class / karaoke spans
+			// first; word fill picks up next frame against the settled DOM.
+			this.safeSetState({ activeIndex: idx });
+			this._wi = -2;
+		} else if (data.kind === "richsync") {
+			// The only thing updated every frame - straight on the DOM, no
+			// React render. Class shuffling happens only when the word changes.
+			this.tickWords(data.lines[idx], pos);
+		}
+	}
+
+	tickWords(line, pos) {
+		const container = this.wordsRef.current;
+		if (!line || !line.words || !line.words.length || !container) return;
+
+		const wi = LXSync.activeWord(line.words, pos);
+		if (wi !== this._wi || container !== this._wc) {
+			const kids = container.children;
+			for (let k = 0; k < kids.length; k++) {
+				const cl = kids[k].classList;
+				cl.toggle("lx-word--done", k < wi);
+				cl.toggle("lx-word--active", k === wi);
+				cl.toggle("lx-word--soon", k > wi);
+			}
+			this._wi = wi;
+			this._wc = container;
+		}
+		container.style.setProperty("--wp", LXSync.wordProgress(line.words, wi, pos).toFixed(3));
 	}
 
 	/* ----------------------------------------------------------- player events */
@@ -265,9 +320,10 @@ class LyricsApp extends react.Component {
 		const token = ++this.token;
 
 		if (this.lyricsAbort) this.lyricsAbort.abort();
-		if (this.translateAbort) this.translateAbort.abort();
 		this.lyricsAbort = new AbortController();
-		this.translateAbort = new AbortController();
+		this.cancelTranslation();
+		this._wi = -2;
+		this._wc = null;
 		const signal = this.lyricsAbort.signal;
 
 		if (!info) {
@@ -280,6 +336,7 @@ class LyricsApp extends react.Component {
 			data: null,
 			activeIndex: -1,
 			translations: EMPTY_TRANSLATIONS,
+			translationProvider: "",
 			phase: info.kind === "track" ? "loading" : "unsupported",
 		});
 
@@ -292,47 +349,89 @@ class LyricsApp extends react.Component {
 			.catch(() => {});
 
 		if (info.kind !== "track") return;
+		this.applyLyrics(info, token, signal);
+	}
 
-		LXProviders.fetchLyrics(info, signal)
+	// Re-fetch lyrics for the current track without the loading flash - used
+	// when the karaoke toggle changes the provider chain, or "Re-fetch lyrics".
+	refetchLyrics() {
+		const info = this.state.info;
+		if (!info || info.kind !== "track") return;
+		const token = ++this.token;
+		if (this.lyricsAbort) this.lyricsAbort.abort();
+		this.lyricsAbort = new AbortController();
+		this.cancelTranslation();
+		this._wi = -2;
+		this._wc = null;
+		this.applyLyrics(info, token, this.lyricsAbort.signal);
+	}
+
+	applyLyrics(info, token, signal) {
+		const karaoke = !!this.state.settings.karaoke;
+		LXProviders.fetchLyrics(info, signal, { karaoke })
 			.then((data) => {
 				if (token !== this.token) return;
-				const map = { none: "none", unsupported: "unsupported", instrumental: "instrumental" };
-				if (map[data.kind]) {
-					this.safeSetState({ phase: map[data.kind], data });
+				const screen = { none: "none", unsupported: "unsupported", instrumental: "instrumental" };
+				if (screen[data.kind]) {
+					this.safeSetState({ phase: screen[data.kind], data, activeIndex: -1 });
 					return;
 				}
-				this.safeSetState({ phase: "lyrics", data });
+				LXLog.info("lyrics:", data.provider, "·", data.kind, "·", data.lines.length, "lines");
+				this.safeSetState({ phase: "lyrics", data, activeIndex: -1 });
+				this._wi = -2;
 				this.pokeClock();
-				this.runTranslation(data, info, token);
+				this.runTranslation(data, info);
 			})
-			.catch(() => {
-				if (token === this.token) this.safeSetState({ phase: "none", data: null });
+			.catch((err) => {
+				if (token === this.token) {
+					LXLog.warn("lyrics fetch failed:", err && err.message);
+					this.safeSetState({ phase: "none", data: null });
+				}
 			});
 	}
 
 	/* ----------------------------------------------------------- translation */
 
-	// Re-run when the toggle flips or the language changes, without touching
-	// the lyrics request.
-	retranslate() {
+	// Stop any running translation batch and open a fresh generation. Every
+	// caller of runTranslation goes through here first, so a stale batch that
+	// resolves late (slow network, aborted mid-flight) fails its `tGen` guard
+	// and cannot write results for the wrong track or the wrong language.
+	cancelTranslation() {
+		this.tToken++;
 		if (this.translateAbort) this.translateAbort.abort();
 		this.translateAbort = new AbortController();
+	}
+
+	// Re-run for the current lyrics when the toggle flips or the language
+	// changes - without touching the lyrics request.
+	retranslate() {
+		this.cancelTranslation();
 		const { data, info } = this.state;
-		if (data && info && (data.kind === "synced" || data.kind === "unsynced")) {
-			this.runTranslation(data, info, this.token);
+		if (data && info && (data.kind === "synced" || data.kind === "unsynced" || data.kind === "richsync")) {
+			this.runTranslation(data, info);
 		} else {
-			this.safeSetState({ translations: EMPTY_TRANSLATIONS });
+			this.safeSetState({ translations: EMPTY_TRANSLATIONS, translationProvider: "" });
 		}
 	}
 
-	runTranslation(data, info, token) {
+	runTranslation(data, info) {
+		if (!this.translateAbort) this.translateAbort = new AbortController();
+		const tGen = this.tToken; // fixed for this batch; cancelTranslation() bumped it
+		const alive = () => this._mounted && tGen === this.tToken;
+
 		if (!this.state.settings["translate-enabled"]) {
+			this._translatedThisEnable = false;
 			this.safeSetState({ translations: { map: {}, status: "idle" } });
 			return;
 		}
 
 		const target = this.state.settings["translate-lang"];
 		const sourceHint = (data.language || "").toLowerCase().split(/[-_]/)[0];
+
+		if (!this._translatedThisEnable) {
+			this._translatedThisEnable = true;
+			LXLog.info("translation enabled → target", target, "· provider", LXTranslate.providerId());
+		}
 
 		if (sourceHint && sourceHint === target) {
 			this.safeSetState({ translations: { map: {}, status: "source-matches" } });
@@ -346,11 +445,9 @@ class LyricsApp extends react.Component {
 		let lastPaint = 0;
 		const paint = (partial) => {
 			const now = Date.now();
-			if (now - lastPaint < 280) return;
+			if (now - lastPaint < 300 || !alive()) return;
 			lastPaint = now;
-			if (token === this.token && this.state.settings["translate-enabled"]) {
-				this.safeSetState({ translations: { map: partial, status: "loading" } });
-			}
+			this.safeSetState({ translations: { map: partial, status: "loading" } });
 		};
 
 		LXTranslate.translateLines(data.lines, {
@@ -361,14 +458,19 @@ class LyricsApp extends react.Component {
 			onProgress: paint,
 		})
 			.then((res) => {
-				if (token !== this.token) return;
+				if (!alive()) return;
 				const status =
 					{ ok: "done", partial: "partial", "not-needed": "source-matches", cancelled: "idle", unavailable: "unavailable" }[res.status] ||
 					"idle";
-				this.safeSetState({ translations: { map: res.map, status } });
+				this.safeSetState({
+					translations: { map: res.map, status, detected: res.detected || "" },
+					translationProvider: res.provider || "",
+				});
 			})
-			.catch(() => {
-				if (token === this.token) this.safeSetState({ translations: { map: {}, status: "unavailable" } });
+			.catch((err) => {
+				if (!alive()) return;
+				LXLog.warn("translation batch error:", err && err.message);
+				this.safeSetState({ translations: { map: {}, status: "unavailable" } });
 			});
 	}
 
@@ -378,6 +480,7 @@ class LyricsApp extends react.Component {
 		LXSettings.set(key, value);
 		this.setState((s) => ({ settings: Object.assign({}, s.settings, { [key]: value }) }), () => {
 			if (key === "translate-enabled" || key === "translate-lang") this.retranslate();
+			if (key === "karaoke") this.refetchLyrics();
 			if (key === "autohide") this.armAutoHide();
 		});
 	}
@@ -439,15 +542,26 @@ class LyricsApp extends react.Component {
 
 	/* ---------------------------------------------------------------- render */
 
-	translationHint() {
+	// Provider label + one-line status for the settings popover.
+	translationStatus() {
 		const t = this.state.translations;
-		if (!this.state.settings["translate-enabled"]) return null;
-		if (t.status === "loading") return "Translating…";
-		if (t.status === "partial") return "Some lines couldn’t be translated.";
-		if (t.status === "unavailable") return "Translation is unavailable right now.";
-		if (t.status === "source-matches")
-			return "These lyrics are already in " + LXSettings.languageLabel(this.state.settings["translate-lang"]) + ".";
-		return null;
+		const s = this.state.settings;
+		const prov = { google: "Google", "google-dict": "Google", mymemory: "MyMemory" }[this.state.translationProvider] || "";
+		if (!s["translate-enabled"]) return { text: "Off", tone: "muted" };
+		switch (t.status) {
+			case "loading":
+				return { text: (prov ? "via " + prov + " · " : "") + "translating…", tone: "busy" };
+			case "done":
+				return { text: prov ? "via " + prov : "ready", tone: "ok" };
+			case "partial":
+				return { text: (prov ? "via " + prov + " · " : "") + "some lines missing", tone: "warn" };
+			case "unavailable":
+				return { text: "unavailable — try again shortly", tone: "warn" };
+			case "source-matches":
+				return { text: "already in " + LXSettings.languageLabel(s["translate-lang"]), tone: "muted" };
+			default:
+				return { text: "ready", tone: "muted" };
+		}
 	}
 
 	renderStage() {
@@ -456,7 +570,7 @@ class LyricsApp extends react.Component {
 		if (phase === "lyrics" && data) {
 			const showTranslations = settings["translate-enabled"] && Object.keys(translations.map).length > 0;
 			return react.createElement(Lines, {
-				key: this.state.info.uri + "|" + data.provider,
+				key: this.state.info.uri + "|" + data.provider + "|" + data.kind,
 				data,
 				translations: translations.map,
 				activeIndex,
@@ -464,6 +578,7 @@ class LyricsApp extends react.Component {
 				targetLang: settings["translate-lang"],
 				onSeek: this.seek,
 				reduceMotion,
+				wordsRef: this.wordsRef,
 			});
 		}
 
@@ -499,19 +614,28 @@ class LyricsApp extends react.Component {
 				visible: controlsVisible || menuOpen,
 				immersive,
 				menuOpen,
-				provider: data ? data.provider : "",
-				copyright: data ? data.copyright : "",
-				tStatus: translations.status,
-				tHint: this.translationHint(),
+				busy: settings["translate-enabled"] && translations.status === "loading",
+				diagnostics: {
+					source: data ? data.provider : "",
+					sync: data ? data.kind : "",
+					translation: this.translationStatus(),
+					detected: translations.detected || "",
+					cacheCount: LXTranslate.cacheCount(),
+					wordSyncPossible: !!data && data.kind === "richsync",
+				},
 				onInteract: this.onPointerActivity,
 				onToggleTranslate: () => this.toggleTranslate(),
 				onLang: (code) => this.updateSetting("translate-lang", code),
 				onImmersive: () => this.toggleImmersive(),
 				onToggleMenu: () => this.setState((s) => ({ menuOpen: !s.menuOpen })),
 				onSetting: (key, value) => this.updateSetting(key, value),
-				onReload: () => {
+				onClearCache: () => {
 					LXTranslate.clearCache();
-					this.loadTrack();
+					this.retranslate();
+					this.forceUpdate();
+				},
+				onReload: () => {
+					this.refetchLyrics();
 					this.setState({ menuOpen: false });
 				},
 			}),

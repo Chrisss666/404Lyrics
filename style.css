@@ -220,6 +220,49 @@
 		0 0 32px color-mix(in srgb, var(--lx-accent) 52%, transparent);
 }
 
+/* ---- karaoke: word-by-word fill on the active line ----
+ * The active line renders one .lx-word per token. .lx-word__fill is the same
+ * text stacked exactly over .lx-word__base and clipped from the right; --wp
+ * (0..1, set once per frame on the container) drives only the active word. */
+.lx-line__text--kara {
+	--wp: 0;
+}
+
+.lx-word {
+	position: relative;
+	display: inline-block;
+	white-space: pre;
+	color: color-mix(in srgb, var(--lx-ink) 34%, transparent);
+	transition: color 0.18s linear;
+}
+
+.lx-word__fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	color: #fff;
+	white-space: pre;
+	pointer-events: none;
+	clip-path: inset(0 100% 0 0);
+	text-shadow: 0 0 26px color-mix(in srgb, var(--lx-accent) 60%, transparent);
+}
+
+.lx-word--done {
+	color: #fff;
+}
+
+.lx-word--done .lx-word__fill {
+	clip-path: inset(0 0 0 0);
+}
+
+.lx-word--active .lx-word__fill {
+	clip-path: inset(0 calc(100% - var(--wp) * 100%) 0 0);
+}
+
+.lx-word--soon {
+	color: color-mix(in srgb, var(--lx-ink) 30%, transparent);
+}
+
 .lx-line__tr {
 	display: block;
 	margin-top: 0.34em;
@@ -388,42 +431,6 @@
 	}
 }
 
-.lx-lang {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	height: 38px;
-	padding: 0 10px;
-	border: 1px solid rgba(255, 255, 255, 0.14);
-	border-radius: 999px;
-	background: rgba(18, 18, 24, 0.44);
-	backdrop-filter: blur(14px);
-	-webkit-backdrop-filter: blur(14px);
-	color: var(--lx-ink);
-}
-
-.lx-lang__select {
-	appearance: none;
-	-webkit-appearance: none;
-	max-width: 128px;
-	border: 0;
-	background: transparent;
-	color: inherit;
-	font: inherit;
-	font-size: 0.82rem;
-	cursor: pointer;
-}
-
-.lx-lang__select:focus-visible {
-	outline: 2px solid var(--lx-accent);
-	outline-offset: 3px;
-	border-radius: 4px;
-}
-
-.lx-lang__select option {
-	color: #000;
-}
-
 .lx-controls__menu {
 	position: relative;
 }
@@ -432,15 +439,87 @@
 	position: absolute;
 	top: calc(100% + 10px);
 	right: 0;
-	width: 270px;
+	width: 276px;
+	max-height: min(76vh, 560px);
+	overflow-y: auto;
+	overflow-x: hidden;
 	padding: 12px;
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	border-radius: 16px;
-	background: rgba(15, 15, 21, 0.9);
+	background: rgba(15, 15, 21, 0.92);
 	backdrop-filter: blur(26px);
 	-webkit-backdrop-filter: blur(26px);
 	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 	animation: lx-pop 0.18s ease both;
+	scrollbar-width: thin;
+}
+
+.lx-pop__title:not(:first-child) {
+	margin-top: 4px;
+}
+
+.lx-pop__row--select {
+	cursor: default;
+}
+
+.lx-pop__row--select:hover {
+	background: transparent;
+}
+
+.lx-pop__select {
+	flex: none;
+	max-width: 150px;
+	padding: 5px 8px;
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.04);
+	color: var(--lx-ink);
+	font: inherit;
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+.lx-pop__select:focus-visible {
+	outline: 2px solid var(--lx-accent);
+	outline-offset: 2px;
+}
+
+.lx-pop__select option {
+	color: #000;
+}
+
+.lx-pop__status {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 2px 6px 4px;
+	font-size: 0.76rem;
+	line-height: 1.4;
+}
+
+.lx-pop__status--muted {
+	color: color-mix(in srgb, var(--lx-ink) 50%, transparent);
+}
+
+.lx-pop__status--ok {
+	color: color-mix(in srgb, var(--lx-ink) 72%, transparent);
+}
+
+.lx-pop__status--busy {
+	color: color-mix(in srgb, var(--lx-accent) 90%, white 10%);
+}
+
+.lx-pop__status--warn {
+	color: #ffb4a2;
+}
+
+.lx-pop__dot {
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentColor;
+	animation: lx-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes lx-pop {
@@ -690,8 +769,8 @@
 		right: 10px;
 		gap: 6px;
 	}
-	.lx-lang__select {
-		max-width: 88px;
+	.lx-pop {
+		width: min(276px, calc(100vw - 24px));
 	}
 	.lx-now {
 		max-width: 72vw;
@@ -730,5 +809,16 @@
 	 * dropping entirely when the user has asked for less of it. */
 	.lx-line__bar {
 		display: none;
+	}
+	/* Karaoke stays - the word fill is information, not decoration - but the
+	 * glow and the per-word colour easing are dropped. */
+	.lx-word {
+		transition: none;
+	}
+	.lx-word__fill {
+		text-shadow: none;
+	}
+	.lx-pop__dot {
+		animation: none;
 	}
 }

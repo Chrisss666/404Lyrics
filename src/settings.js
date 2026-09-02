@@ -39,6 +39,7 @@ const LXSettings = (() => {
 	const DEFAULTS = {
 		"translate-enabled": false,
 		"translate-lang": "", // resolved lazily from the client locale on first read
+		karaoke: true, // use word-by-word timing when a provider has it
 		ambient: true, // slow background drift
 		autohide: true, // fade the control cluster while the mouse is still
 	};

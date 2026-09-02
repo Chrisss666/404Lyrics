@@ -20,16 +20,18 @@ album-art background. Sits alongside `kpop-theme` and `spicetify-stats`.
 
 ```
 manifest.json      name, icons, subfiles (order matters), subfiles_extension
-index.js           app shell: state, playback clock, screen routing, boundary
+index.js           app shell: state, playback clock (+ per-frame word fill),
+                   screen routing, error boundary
 extension.js       subfiles_extension – playbar button + native-button redirect
 style.css          all styles, class prefix lx-
+src/net.js         LXNet (CosmosAsync-first getJson) + LXLog (gated logger)
 src/settings.js    LXSettings   – prefs + locale detection
 src/player.js      LXPlayer     – the only Spicetify.Player consumer
 src/colors.js      LXColors     – artwork palette (3 fallbacks)
-src/sync.js        LXSync       – pure: active index, line progress
-src/providers.js   LXProviders  – Spotify colour-lyrics, then LRCLIB
-src/translate.js   LXTranslate  – provider interface, Google, cache, batch
-src/ui.js          LXUi + h()   – controls, now-playing, state screens
+src/sync.js        LXSync       – pure: active line + word index, progress
+src/providers.js   LXProviders  – Netease (word timing), Spotify, LRCLIB
+src/translate.js   LXTranslate  – 3-provider keyless chain, cache, batch
+src/ui.js          LXUi + h()   – control cluster, settings panel, screens
 ```
 
 `subfiles` share one scope with `index.js`; each is an IIFE exposing one `LX*`
@@ -38,18 +40,30 @@ object. `extension.js` has its own scope – only the route name and the
 
 ## Rules
 
-- Every track load takes a monotonic token + its own `AbortController`.
-  Lyrics / colour / translation results are dropped unless the token still
-  matches. Never regress this – it is the whole race-safety story.
-- Translation and artwork failures must never break lyrics. Swallow those,
-  not everything.
+- Race safety: `this.token` (track identity) + per-load `AbortController`, and
+  `this.tToken` (translation generation, bumped by `cancelTranslation()`).
+  Lyrics / colour / karaoke / translation results are dropped unless their
+  token still matches. Never regress this. Every `runTranslation` caller goes
+  through `cancelTranslation()` first.
+- Translation, karaoke and artwork failures must never break lyrics. Swallow
+  those, not everything. Provider errors go through `LXLog` (gated on
+  `localStorage["404lyrics:debug"]`), never bare `console.*`.
+- All outbound requests go through `LXNet.getJson` (CosmosAsync first, past
+  CSP + CORS). Don't add bare `fetch` to third-party hosts.
+- Karaoke: only Netease `yrc`/`klyric` (keyless — no Musixmatch, it needs a
+  token). Never fake word timing; never let Netease line-level lyrics
+  displace Spotify line sync. Word fill writes the DOM directly in the rAF
+  loop; React re-renders only when the active line or word changes.
 - Spotify internals (colour endpoints, `[data-testid="lyrics-button"]`) are
   isolated and fail quietly. Don't scatter Spotify DOM selectors around.
-- Animate `transform` / `opacity` / `filter` only. No per-frame layout.
+- Animate `transform` / `opacity` / `filter` / `clip-path` only. No per-frame
+  layout, no per-frame React render.
 - Respect `prefers-reduced-motion` (JS state + the CSS media block).
 - Class names are `lx-` prefixed. Chrome uses `--spice-*` where sensible;
   the immersive surface uses artwork-derived colour.
-- No `console.log` in committed code. Comments explain non-obvious choices.
+- No bare `console.*` in committed code — diagnostics go through `LXLog`,
+  which is silent unless the debug flag is set. Comments explain non-obvious
+  choices, not obvious code.
 
 ## Workflow
 

@@ -2,12 +2,17 @@
  *
  * Design notes
  * ------------
- * A Spicetify extension runs as untrusted frontend JavaScript, so a paid
- * translation API is out: its key would be sitting in plain text in everyone's
- * Spotify install. What is actually reachable without credentials is Google's
- * public `translate_a` endpoint (the one the Google Translate website itself
- * calls). Spicetify relaxes Spotify's connect-src CSP, so a plain `fetch` to
- * it works. That is the default and only bundled provider.
+ * A Spicetify extension runs as untrusted frontend JavaScript, so a paid /
+ * keyed translation API is out - the key would sit in plain text in everyone's
+ * install. What is reachable without credentials are the same public endpoints
+ * browser translation extensions use. Three are bundled and tried in order,
+ * because each is unofficial and independently rate-limited:
+ *
+ *   1. translate.googleapis.com/translate_a/single   (client=gtx)
+ *   2. clients5.google.com/translate_a/t             (client=dict-chrome-ex)
+ *   3. api.mymemory.translated.net/get               (community memory)
+ *
+ * All requests go through LXNet (CosmosAsync, so no CSP/CORS wall).
  *
  * Everything is written against a tiny provider interface so a self-hosted
  * LibreTranslate instance, DeepL-through-a-proxy, etc. can be added later
@@ -28,8 +33,8 @@
 const LXTranslate = (() => {
 	const CACHE_KEY = "404lyrics:tcache";
 	const CACHE_LIMIT = 4000; // entries; oldest are evicted first
-	const CONCURRENCY = 6;
-	const MAX_CONSECUTIVE_FAILURES = 4; // treat as rate-limited, stop the batch
+	const CONCURRENCY = 5;
+	const MAX_CONSECUTIVE_FAILURES = 5; // treat as rate-limited, stop the batch
 
 	/* ------------------------------------------------------------------ cache */
 
@@ -91,33 +96,99 @@ const LXTranslate = (() => {
 		scheduleFlush();
 	}
 
-	/* --------------------------------------------------------- Google provider */
+	/* ------------------------------------------------------------- providers */
 
-	const googleProvider = {
+	function enc(s) {
+		return encodeURIComponent(s);
+	}
+
+	// translate.googleapis.com - nested-array response, also reports source.
+	const googleGtx = {
 		id: "google",
 		async translateOne(text, target, sourceHint, signal) {
 			const url =
-				"https://translate.googleapis.com/translate_a/single?client=gtx&dt=t" +
-				`&sl=${encodeURIComponent(sourceHint || "auto")}` +
-				`&tl=${encodeURIComponent(target)}` +
-				`&q=${encodeURIComponent(text)}`;
-
-			const res = await fetch(url, { signal });
-			if (!res.ok) throw new Error(`google ${res.status}`);
-			const data = await res.json();
-
-			// data[0] -> array of [translatedChunk, originalChunk, ...]
-			const chunks = Array.isArray(data && data[0]) ? data[0] : [];
-			const translated = chunks.map((c) => (c && c[0]) || "").join("");
-			const detected = (data && data[2]) || (data && data[8] && data[8][0] && data[8][0][0]) || "";
-			return { translated: translated.trim(), detected };
+				`https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=${enc(sourceHint || "auto")}` +
+				`&tl=${enc(target)}&q=${enc(text)}`;
+			const data = await LXNet.getJson(url, { signal });
+			if (!Array.isArray(data) || !Array.isArray(data[0])) throw new Error("gtx: unexpected shape");
+			const translated = data[0].map((c) => (c && c[0]) || "").join("");
+			return { translated: translated.trim(), detected: (data[2] || "").toString() };
 		},
 	};
 
-	let activeProvider = googleProvider;
+	// clients5.google.com - flat response: ["translated"] or [["translated","src"]].
+	const googleDict = {
+		id: "google-dict",
+		async translateOne(text, target, sourceHint, signal) {
+			const url =
+				`https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${enc(sourceHint || "auto")}` +
+				`&tl=${enc(target)}&q=${enc(text)}`;
+			const data = await LXNet.getJson(url, { signal });
+			let translated = "";
+			let detected = "";
+			if (Array.isArray(data) && typeof data[0] === "string") translated = data[0];
+			else if (Array.isArray(data) && Array.isArray(data[0])) {
+				translated = data[0][0] || "";
+				detected = data[0][1] || data[1] || "";
+			} else throw new Error("dict: unexpected shape");
+			return { translated: translated.trim(), detected: detected.toString() };
+		},
+	};
+
+	// MyMemory - keyless community translation memory, generous anon quota.
+	const myMemory = {
+		id: "mymemory",
+		async translateOne(text, target, sourceHint, signal) {
+			const pair = `${(sourceHint && sourceHint !== "auto" ? sourceHint : "en")}|${target}`;
+			const url = `https://api.mymemory.translated.net/get?q=${enc(text)}&langpair=${enc(pair)}`;
+			const data = await LXNet.getJson(url, { signal });
+			const t = data && data.responseData && data.responseData.translatedText;
+			if (!t || (data.responseStatus && data.responseStatus !== 200)) throw new Error(`mymemory ${data && data.responseStatus}`);
+			return { translated: String(t).trim(), detected: "" };
+		},
+	};
+
+	/* Meta-provider: walk the list, stick to whichever answered last so a
+	 * healthy provider is not re-probed for every line. A provider is retried
+	 * from the top only after the current one fails. */
+	const chain = (() => {
+		const list = [googleGtx, googleDict, myMemory];
+		let idx = 0;
+		return {
+			get id() {
+				return list[idx].id;
+			},
+			async translateOne(text, target, sourceHint, signal) {
+				let lastErr;
+				for (let step = 0; step < list.length; step++) {
+					const p = list[(idx + step) % list.length];
+					try {
+						const out = await p.translateOne(text, target, sourceHint, signal);
+						if (!out || typeof out.translated !== "string") throw new Error("empty result");
+						if (step > 0) {
+							idx = (idx + step) % list.length;
+							LXLog.info("translation provider →", p.id);
+						}
+						return out;
+					} catch (err) {
+						if (err && err.name === "AbortError") throw err;
+						lastErr = err;
+						LXLog.warn("translation provider failed:", p.id, err && err.message);
+					}
+				}
+				throw lastErr || new Error("all translation providers failed");
+			},
+		};
+	})();
+
+	let activeProvider = chain;
 
 	function useProvider(provider) {
 		if (provider && typeof provider.translateOne === "function") activeProvider = provider;
+	}
+
+	function providerId() {
+		return (activeProvider && activeProvider.id) || "unknown";
 	}
 
 	/* -------------------------------------------------------------- the batch */
@@ -132,9 +203,9 @@ const LXTranslate = (() => {
 	/**
 	 * Translate every distinct non-empty line.
 	 *
-	 * @param {{time:number,text:string}[]} lines
+	 * @param {{time:number,text:string,words?:object[]}[]} lines
 	 * @param {object} opts { trackId, target, sourceHint, signal, onProgress }
-	 * @returns {Promise<{ map: Record<string,string>, detected: string, status: string }>}
+	 * @returns {Promise<{ map, detected, status, provider }>}
 	 *   `map` is keyed by original line text -> translated text.
 	 *   status: "ok" | "partial" | "cancelled" | "unavailable" | "not-needed"
 	 */
@@ -149,7 +220,10 @@ const LXTranslate = (() => {
 		// cache hit on reopen.
 		const srcKey = sourceHint || "auto";
 
-		if (!target) return { map, detected, status: "not-needed" };
+		if (!target) return { map, detected, status: "not-needed", provider: providerId() };
+		if (sourceHint && sourceHint === target) return { map, detected, status: "not-needed", provider: providerId() };
+
+		LXLog.info("translate batch:", (lines && lines.length) || 0, "lines ->", target, "(source hint:", sourceHint || "auto", ")");
 
 		// Distinct texts, skipping instrumental marks and blanks.
 		const unique = [];
@@ -160,7 +234,7 @@ const LXTranslate = (() => {
 			seen.add(t);
 			unique.push(t);
 		}
-		if (!unique.length) return { map, detected, status: "not-needed" };
+		if (!unique.length) return { map, detected, status: "not-needed", provider: providerId() };
 
 		// Serve from cache first; only the misses hit the network.
 		const misses = [];
@@ -174,8 +248,8 @@ const LXTranslate = (() => {
 		}
 		if (onProgress) onProgress({ ...map });
 
-		if (!misses.length) return { map, detected, status: "ok" };
-		if (signal && signal.aborted) return { map, detected, status: "cancelled" };
+		if (!misses.length) return { map, detected, status: "ok", provider: providerId() };
+		if (signal && signal.aborted) return { map, detected, status: "cancelled", provider: providerId() };
 
 		let consecutiveFailures = 0;
 		let anySuccess = Object.keys(map).length > 0;
@@ -218,22 +292,34 @@ const LXTranslate = (() => {
 
 		await Promise.all(Array.from({ length: Math.min(CONCURRENCY, misses.length) }, worker));
 
-		if (cancelled || (signal && signal.aborted)) return { map, detected, status: "cancelled" };
+		if (cancelled || (signal && signal.aborted)) return { map, detected, status: "cancelled", provider: providerId() };
 		if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-			return { map, detected, status: anySuccess ? "partial" : "unavailable" };
+			LXLog.warn("translation stopped after repeated failures - likely rate-limited");
+			return { map, detected, status: anySuccess ? "partial" : "unavailable", provider: providerId() };
 		}
 		const complete = unique.every((t) => t in map || readCached(trackId, srcKey, target, t) !== undefined);
-		return { map, detected, status: complete ? "ok" : "partial" };
+		LXLog.info("translate batch done:", Object.keys(map).length, "/", unique.length, "via", providerId());
+		return { map, detected, status: complete ? "ok" : "partial", provider: providerId() };
 	}
 
 	function clearCache() {
+		const n = cacheCount();
 		cache = {};
 		try {
 			localStorage.removeItem(CACHE_KEY);
 		} catch (e) {
 			/* ignore */
 		}
+		LXLog.info("translation cache cleared (" + n + " entries)");
 	}
 
-	return { translateLines, useProvider, clearCache, googleProvider };
+	function cacheCount() {
+		try {
+			return Object.keys(loadCache()).length;
+		} catch (e) {
+			return 0;
+		}
+	}
+
+	return { translateLines, useProvider, clearCache, cacheCount, providerId };
 })();
