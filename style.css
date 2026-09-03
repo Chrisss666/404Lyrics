@@ -45,7 +45,10 @@
 	--lx-lyric-font: "Bricolage Grotesque", "Spotify Mix", var(--font-family, "Circular"), system-ui, -apple-system, sans-serif;
 	--lx-ui-font: var(--font-family, "Circular", system-ui, -apple-system, sans-serif);
 
-	--lx-glide: 620ms;
+	/* build: karaoke-smooth-2026-09-03e - word fill is driven straight off the
+	   playback clock; column glide tightened 620->460ms; line-change blur on a
+	   shorter curve. */
+	--lx-glide: 460ms;
 	--lx-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
 	/* Overlap of Spotify's translucent top bar, measured at runtime by
@@ -274,11 +277,14 @@
 	filter: blur(calc(var(--ad) * 0.72px));
 	transform: scale(calc(1 - var(--ad) * 0.02));
 	transform-origin: left center;
+	/* Opacity/scale/colour lead; the depth-of-field blur follows on a shorter
+	 * curve so a line-change is a brief rack-focus, not ~14 lines re-rastering
+	 * blur for half a second while the column is also gliding. */
 	transition:
-		opacity 0.45s ease,
-		filter 0.45s ease,
-		transform 0.45s var(--lx-ease),
-		color 0.4s ease;
+		opacity 0.4s ease,
+		transform 0.42s var(--lx-ease),
+		filter 0.3s ease,
+		color 0.35s ease;
 }
 
 .lx-line--past {
@@ -316,9 +322,13 @@
 }
 
 /* ---- karaoke: word-by-word fill on the active line ----
- * The active line renders one .lx-word per token. .lx-word__fill is the same
- * text stacked exactly over .lx-word__base and clipped from the right; --wp
- * (0..1, set once per frame on the container) drives only the active word. */
+ * The active line renders one .lx-word per token, each holding the muted base
+ * text and a white .lx-word__fill copy stacked exactly over it. The current
+ * word stays MUTED underneath; the only bright thing is the fill, revealed
+ * left-to-right by a tight gradient mask as --wp (0..1, written to the
+ * container every frame from the playback clock) sweeps across it. So you see
+ * one bright wet edge travelling through an otherwise dim word - a clean
+ * karaoke wipe, not each word flipping on. Completed words hold full white. */
 .lx-line__text--kara {
 	--wp: 0;
 }
@@ -327,8 +337,19 @@
 	position: relative;
 	display: inline-block;
 	white-space: pre;
-	color: color-mix(in srgb, var(--lx-ink) 34%, transparent);
-	transition: color 0.18s linear;
+	color: color-mix(in srgb, var(--lx-ink) 30%, transparent);
+	transition: color 0.3s ease;
+}
+
+.lx-word--soon {
+	color: color-mix(in srgb, var(--lx-ink) 26%, transparent);
+}
+
+/* Current word: still muted underneath - a hair brighter than upcoming so you
+ * can see which word is live, but nowhere near white. The wipe supplies the
+ * brightness. */
+.lx-word--active {
+	color: color-mix(in srgb, var(--lx-ink) 44%, transparent);
 }
 
 .lx-word__fill {
@@ -338,32 +359,49 @@
 	color: #fff;
 	white-space: pre;
 	pointer-events: none;
-	clip-path: inset(0 100% 0 0);
-	/* Tight enough to hug the glyph edges - no cloud, and small enough that the
-	 * clip edge on a half-filled word shows no hard band. */
+	opacity: 0; /* an upcoming word's fill is not painted at all */
+	/* Tight edge: fully lit up to just behind --wp, a ~0.22em feather so the
+	 * boundary is soft but still reads as a distinct wet edge, then nothing.
+	 * Vertical is never clipped - this only ever sweeps left to right. */
+	-webkit-mask-image: linear-gradient(
+		90deg,
+		#000 calc(var(--wp, 0) * 100% - 0.06em),
+		rgba(0, 0, 0, 0) calc(var(--wp, 0) * 100% + 0.16em)
+	);
+	mask-image: linear-gradient(
+		90deg,
+		#000 calc(var(--wp, 0) * 100% - 0.06em),
+		rgba(0, 0, 0, 0) calc(var(--wp, 0) * 100% + 0.16em)
+	);
+	mask-mode: alpha;
 	text-shadow:
-		0 0 1px color-mix(in srgb, var(--lx-accent) 40%, transparent),
-		0 0 4px color-mix(in srgb, var(--lx-accent) 16%, transparent);
+		0 0 2px color-mix(in srgb, var(--lx-accent) 42%, transparent),
+		0 0 7px color-mix(in srgb, var(--lx-accent) 18%, transparent);
 }
 
+/* The word being sung: a warmer, slightly stronger glyph glow concentrated on
+ * that travelling edge. Glow is on the GLYPHS only - never a box. */
+.lx-word--active .lx-word__fill {
+	opacity: 1;
+	will-change: mask-image;
+	text-shadow:
+		0 0 2px color-mix(in srgb, var(--lx-accent) 60%, transparent),
+		0 0 10px color-mix(in srgb, var(--lx-accent) 32%, transparent),
+		0 0 22px color-mix(in srgb, var(--lx-accent) 12%, transparent);
+}
+
+/* Completed word: full white, stable, calm glow. */
 .lx-word--done {
 	color: #fff;
 }
 
 .lx-word--done .lx-word__fill {
-	clip-path: inset(0 0 0 0);
-}
-
-.lx-word--active .lx-word__fill {
-	clip-path: inset(0 calc(100% - var(--wp) * 100%) 0 0);
-	/* current word: a touch brighter than completed words, not more blurred */
+	opacity: 1;
+	-webkit-mask-image: none;
+	mask-image: none;
 	text-shadow:
-		0 0 1px color-mix(in srgb, var(--lx-accent) 50%, transparent),
-		0 0 5px color-mix(in srgb, var(--lx-accent) 22%, transparent);
-}
-
-.lx-word--soon {
-	color: color-mix(in srgb, var(--lx-ink) 30%, transparent);
+		0 0 1px color-mix(in srgb, var(--lx-accent) 22%, transparent),
+		0 0 4px color-mix(in srgb, var(--lx-accent) 9%, transparent);
 }
 
 .lx-line__tr {
@@ -1048,13 +1086,24 @@
 		display: none;
 	}
 	/* Karaoke stays - the word fill is information, not decoration - but the
-	 * glow and the per-word colour easing are dropped. */
+	 * glow, the colour/spring easing, the word lift and the compositor hint are
+	 * dropped, and the fill tracks the clock in one step (index.js skips its
+	 * low-pass and the hand-off pop). The reveal mask is kept - it is how the
+	 * fill is shown - but tightened to a near-hard edge. */
 	.lx-word {
 		transition: none;
+	}
+	.lx-word--active {
+		transform: none;
 	}
 	.lx-word__fill,
 	.lx-word--active .lx-word__fill {
 		text-shadow: none;
+		will-change: auto;
+	}
+	.lx-word__fill {
+		-webkit-mask-image: linear-gradient(90deg, #000 calc(var(--wp, 0) * 100%), rgba(0, 0, 0, 0) calc(var(--wp, 0) * 100% + 0.04em));
+		mask-image: linear-gradient(90deg, #000 calc(var(--wp, 0) * 100%), rgba(0, 0, 0, 0) calc(var(--wp, 0) * 100% + 0.04em));
 	}
 	.lx-line--active .lx-line__text:not(.lx-line__text--kara) {
 		text-shadow: 0 2px 18px rgba(0, 0, 0, 0.42);

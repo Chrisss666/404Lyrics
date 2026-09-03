@@ -14,6 +14,12 @@
 
 const react = Spicetify.React;
 
+/* Build tag for the karaoke-smoothing pass. Bump it on any change to the word
+ * fill pipeline (tickWords / --wp / the .lx-word* styles); grepping the applied
+ * Spicetify route bundle for this string confirms that this source - not a
+ * stale CustomApps copy - actually reached the running client. */
+const LX_BUILD = "karaoke-smooth-2026-09-03e";
+
 /* ------------------------------------------------------------- background */
 
 /* One background element, three looks. The palette (base + accent) always
@@ -189,6 +195,7 @@ class LyricsApp extends react.Component {
 		this._oneMoreTick = false;
 		this._wi = -2; // last rendered active-word index (karaoke)
 		this._wc = null; // word container the classes were last written to
+		this._wpShown = null; // last --wp value written (low-passed toward the clock)
 		this.raf = 0;
 		this.hideTimer = 0;
 		this._translatedThisEnable = false;
@@ -297,6 +304,7 @@ class LyricsApp extends react.Component {
 
 	componentDidMount() {
 		this._mounted = true;
+		LXLog.info("404Lyrics", LX_BUILD, "· karaoke fill driven straight off the playback clock");
 
 		this.motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 		this.setState({ reduceMotion: this.motionQuery.matches });
@@ -377,6 +385,7 @@ class LyricsApp extends react.Component {
 			// first; word fill picks up next frame against the settled DOM.
 			this.safeSetState({ activeIndex: idx });
 			this._wi = -2;
+			this._wpShown = null;
 		} else if (data.kind === "richsync") {
 			// The only thing updated every frame - straight on the DOM, no
 			// React render. Class shuffling happens only when the word changes.
@@ -384,11 +393,25 @@ class LyricsApp extends react.Component {
 		}
 	}
 
+	/* Karaoke word fill - runs every animation frame while a richsync line is
+	 * active. LXPlayer.progress() is already a real-time clock (Spotify derives
+	 * it as positionAsOfTimestamp + elapsed wall time), so the fill is driven
+	 * straight off it - there is no second animation timeline to beat against
+	 * playback, which is what makes it read as continuous rather than stepped.
+	 *
+	 *   - word classes (done / active / soon) change only when the sung word
+	 *     changes, never per frame
+	 *   - the fill edge is one custom property (--wp) written to the container;
+	 *     CSS moves a soft-edged reveal mask on .lx-word__fill by that fraction
+	 *   - a light exponential low-pass on --wp swallows rAF jitter and Spotify's
+	 *     small periodic clock re-anchors; it converges in ~4 frames so it never
+	 *     lags the vocal, and any real jump (word edge, seek) snaps through it */
 	tickWords(line, pos) {
 		const container = this.wordsRef.current;
 		if (!line || !line.words || !line.words.length || !container) return;
 
 		const wi = LXSync.activeWord(line.words, pos);
+
 		if (wi !== this._wi || container !== this._wc) {
 			const kids = container.children;
 			for (let k = 0; k < kids.length; k++) {
@@ -397,10 +420,26 @@ class LyricsApp extends react.Component {
 				cl.toggle("lx-word--active", k === wi);
 				cl.toggle("lx-word--soon", k > wi);
 			}
+
 			this._wi = wi;
 			this._wc = container;
+			this._wpShown = wi >= 0 ? LXSync.wordProgress(line.words, wi, pos) : 0;
 		}
-		container.style.setProperty("--wp", LXSync.wordProgress(line.words, wi, pos).toFixed(3));
+
+		if (wi < 0) {
+			container.style.setProperty("--wp", "0");
+			return;
+		}
+
+		const target = LXSync.wordProgress(line.words, wi, pos);
+		let shown = this._wpShown;
+		if (shown == null || this.state.reduceMotion || Math.abs(target - shown) > 0.08) {
+			shown = target; // first frame, reduced motion, or a real jump - no easing
+		} else {
+			shown += (target - shown) * 0.35; // ease out per-frame jitter + tiny corrections
+		}
+		this._wpShown = shown;
+		container.style.setProperty("--wp", shown.toFixed(4));
 	}
 
 	/* ----------------------------------------------------------- player events */
@@ -434,6 +473,7 @@ class LyricsApp extends react.Component {
 		this.cancelTranslation();
 		this._wi = -2;
 		this._wc = null;
+		this._wpShown = null;
 		const signal = this.lyricsAbort.signal;
 
 		if (!info) {
@@ -473,6 +513,7 @@ class LyricsApp extends react.Component {
 		this.cancelTranslation();
 		this._wi = -2;
 		this._wc = null;
+		this._wpShown = null;
 		this.applyLyrics(info, token, this.lyricsAbort.signal);
 	}
 
@@ -489,6 +530,7 @@ class LyricsApp extends react.Component {
 				LXLog.info("lyrics:", data.provider, "·", data.kind, "·", data.lines.length, "lines");
 				this.safeSetState({ phase: "lyrics", data, activeIndex: -1 });
 				this._wi = -2;
+				this._wpShown = null;
 				this.pokeClock();
 				this.runTranslation(data, info);
 			})
