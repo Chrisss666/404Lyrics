@@ -177,6 +177,7 @@ class LyricsApp extends react.Component {
 				"translate-enabled": LXSettings.get("translate-enabled"),
 				"translate-lang": LXSettings.get("translate-lang"),
 				karaoke: LXSettings.get("karaoke"),
+				"sidebar-lyrics": LXSettings.get("sidebar-lyrics"),
 				"focus-mode": LXSettings.get("focus-mode"),
 				"bg-style": LXSettings.get("bg-style"),
 				"bg-blur": LXSettings.get("bg-blur"),

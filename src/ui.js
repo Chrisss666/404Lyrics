@@ -143,6 +143,7 @@ const LXUi = (() => {
 				d.wordSyncPossible ? "Active for this track" : "Uses Netease word timing"
 			),
 			switchRow("Focus Mode", s["focus-mode"], (v) => p.onSetting("focus-mode", v), "Minimal, immersive"),
+			switchRow("Sidebar lyrics box", s["sidebar-lyrics"], (v) => p.onSetting("sidebar-lyrics", v), "Current + next lines under the cover"),
 
 			h("div", { className: "lx-pop__divider" }),
 			h("p", { className: "lx-pop__title" }, "Background"),

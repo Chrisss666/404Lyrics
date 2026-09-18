@@ -61,6 +61,7 @@ const LXSettings = (() => {
 		"bg-dim": 50, // 0..100 slider -> scrim darkness (default maps to the current look)
 		"bg-anim": "normal", // off | low | normal | high
 		autohide: true, // fade the control cluster while the mouse is still
+		"sidebar-lyrics": true, // mini lyrics box in the right sidebar (see sidebar-lyrics.js)
 	};
 
 	/* Slider-value -> CSS mappings. Kept here so the meaning of a stored number
