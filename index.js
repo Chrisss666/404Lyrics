@@ -171,6 +171,7 @@ class LyricsApp extends react.Component {
 			translations: EMPTY_TRANSLATIONS,
 			immersive: false,
 			menuOpen: false,
+			shareOpen: false,
 			controlsVisible: true,
 			reduceMotion: false,
 			translationProvider: "",
@@ -539,6 +540,7 @@ class LyricsApp extends react.Component {
 		const signal = this.lyricsAbort.signal;
 
 		this._analysis = null;
+		this.safeSetState({ shareOpen: false }); // a card is tied to the track it was opened on
 		if (!info) {
 			this.safeSetState({ phase: "none", info: null, data: null, activeIndex: -1, translations: EMPTY_TRANSLATIONS });
 			return;
@@ -856,7 +858,7 @@ class LyricsApp extends react.Component {
 	}
 
 	render() {
-		const { info, palette, settings, immersive, menuOpen, controlsVisible, reduceMotion, data, translations } = this.state;
+		const { phase, info, palette, settings, immersive, menuOpen, controlsVisible, reduceMotion, data, translations, shareOpen } = this.state;
 		const chromeVisible = controlsVisible || menuOpen;
 
 		return react.createElement(
@@ -905,6 +907,8 @@ class LyricsApp extends react.Component {
 				onToggleTranslate: () => this.toggleTranslate(),
 				onToggleFocus: () => this.toggleFocus(),
 				onLang: (code) => this.updateSetting("translate-lang", code),
+				canShare: phase === "lyrics" && !!data && data.lines.some((l) => (l.text || "").trim()),
+				onShare: () => this.setState({ shareOpen: true, menuOpen: false }),
 				onImmersive: () => this.toggleImmersive(),
 				onToggleMenu: () => this.setState((s) => ({ menuOpen: !s.menuOpen })),
 				onSetting: (key, value) => this.updateSetting(key, value),
@@ -919,7 +923,19 @@ class LyricsApp extends react.Component {
 					this.setState({ menuOpen: false });
 				},
 			}),
-			LXUi.nowPlaying(info, { hidden: settings["focus-mode"] && !chromeVisible })
+			LXUi.nowPlaying(info, { hidden: settings["focus-mode"] && !chromeVisible }),
+			// Rendered inside the app root so it stays visible in fullscreen.
+			shareOpen && phase === "lyrics" && data && info
+				? react.createElement(LXShareCard.ShareDialog, {
+						key: info.uri,
+						info,
+						palette,
+						data,
+						translations: settings["translate-enabled"] ? translations.map : {},
+						initialIndex: this.state.activeIndex,
+						onClose: () => this.setState({ shareOpen: false }),
+					})
+				: null
 		);
 	}
 }

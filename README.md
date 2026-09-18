@@ -57,6 +57,11 @@ doesn't provide word-level or synchronized lyrics.
   the analysis isn't available it falls back to a calm synthetic signal. Toggle
   it and set its intensity under Settings → Visualizer; it honours reduced
   motion and is hidden on narrow windows.
+- **Share lyric cards** — the share button in the control cluster opens a
+  picker: choose up to 8 lines (the current line is pre-selected), pick
+  Square / Story / Wide, optionally include the translation, and copy the
+  finished image or save it as a PNG. The card uses the blurred artwork,
+  palette glow and track credit, and works in fullscreen too.
 - **A redesigned view, not a reskin.** One large active line, distance-based
   opacity and blur falloff for everything else, and a hair-thin underline that
   fills as playback moves toward the next line.

@@ -21,6 +21,7 @@ const LXUi = (() => {
 
 	const ICONS = {
 		translate: () => svg(["M4 5h7M8 3v2M10.5 5S9.5 9.5 7 12.5 3 15 3 15", "M6 12s2 2.5 4.5 2.5", "M13 20l4-9 4 9M14.6 16.5h4.8"]),
+		share: () => svg(["M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7", "M16 6l-4-4-4 4", "M12 2v13"]),
 		expand: () => svg(["M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"]),
 		collapse: () => svg(["M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"]),
 		focus: () => svg(["M12 2v3M12 19v3M2 12h3M19 12h3", "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7"]),
@@ -183,6 +184,7 @@ const LXUi = (() => {
 				toggle: true,
 				active: s["focus-mode"],
 			}),
+			props.canShare ? iconButton("share", "Share a lyric card", props.onShare) : null,
 			iconButton(props.immersive ? "collapse" : "expand", props.immersive ? "Exit fullscreen" : "Fullscreen", props.onImmersive, {
 				toggle: true,
 				active: props.immersive,

@@ -31,7 +31,8 @@
         "src/visualizer.js",
         "src/providers.js",
         "src/translate.js",
-        "src/ui.js"
+        "src/ui.js",
+        "src/sharecard.js"
     ],
 
     "subfiles_extension": [
