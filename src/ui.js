@@ -154,6 +154,11 @@ const LXUi = (() => {
 			switchRow("Auto-hide controls", s.autohide, (v) => p.onSetting("autohide", v)),
 
 			h("div", { className: "lx-pop__divider" }),
+			h("p", { className: "lx-pop__title" }, "Visualizer"),
+			switchRow("Fullscreen visualizer", s.visualizer, (v) => p.onSetting("visualizer", v), "Audio-reactive orb, fullscreen only"),
+			s.visualizer ? selectRow("Intensity", s["viz-intensity"], LXSettings.VIZ_LEVELS, bg("viz-intensity")) : null,
+
+			h("div", { className: "lx-pop__divider" }),
 			d.source
 				? h("p", { className: "lx-pop__meta" }, "Lyrics: " + d.source + (SYNC_LABEL[d.sync] ? " · " + SYNC_LABEL[d.sync] : ""))
 				: null,

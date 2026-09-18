@@ -19,7 +19,7 @@ const react = Spicetify.React;
  * fill pipeline (tickWords / --wp / the .lx-word* styles); grepping the applied
  * Spicetify route bundle for this string confirms that this source - not a
  * stale CustomApps copy - actually reached the running client. */
-const LX_BUILD = "karaoke-smooth-2026-09-03e";
+const LX_BUILD = "visualizer-2026-09-19a";
 
 /* ------------------------------------------------------------- background */
 
@@ -184,6 +184,8 @@ class LyricsApp extends react.Component {
 				"bg-blur": LXSettings.get("bg-blur"),
 				"bg-dim": LXSettings.get("bg-dim"),
 				"bg-anim": LXSettings.get("bg-anim"),
+				visualizer: LXSettings.get("visualizer"),
+				"viz-intensity": LXSettings.get("viz-intensity"),
 				autohide: LXSettings.get("autohide"),
 			},
 		};
@@ -205,9 +207,14 @@ class LyricsApp extends react.Component {
 		this._safeTop = -1; // sentinel: first measurement always applies
 		this._bgRaf = 0; // throttles live background-slider previews to 1/frame
 		this._pendingBg = null;
+		this._viz = null; // LXVisualizer controller, alive only while fullscreen + enabled
+		this._vizCanvas = null;
+		this._vizSeen = {}; // last palette / art / analysis / intensity / motion pushed to it
+		this._analysis = null;
 
 		this.rootRef = react.createRef();
 		this.stageRef = react.createRef();
+		this.vizRef = react.createRef();
 		this.wordsRef = react.createRef();
 
 		this.onSong = this.onSong.bind(this);
@@ -328,8 +335,59 @@ class LyricsApp extends react.Component {
 		this.watchSafeTop();
 	}
 
+	componentDidUpdate() {
+		this.syncViz();
+	}
+
+	/* Fullscreen visualizer lifecycle. The canvas only exists in the DOM while
+	 * immersive + enabled (see render), so this creates / destroys the renderer
+	 * to match and pushes over only the inputs that actually changed. */
+	syncViz() {
+		const s = this.state;
+		const canvas = this.vizRef.current;
+		const want = s.immersive && s.settings.visualizer && canvas;
+
+		if (!want) {
+			if (this._viz) {
+				this._viz.destroy();
+				this._viz = null;
+				this._vizCanvas = null;
+			}
+			return;
+		}
+
+		const seen = this._vizSeen;
+		if (!this._viz || this._vizCanvas !== canvas) {
+			if (this._viz) this._viz.destroy();
+			this._viz = LXVisualizer.create(canvas, canvas.parentElement);
+			this._vizCanvas = canvas;
+			for (const k of Object.keys(seen)) delete seen[k];
+			if (!this._viz) return;
+		}
+
+		const v = this._viz;
+		const image = s.info ? s.info.image : "";
+		if (seen.reduced !== s.reduceMotion) v.setReduced((seen.reduced = s.reduceMotion));
+		if (seen.intensity !== s.settings["viz-intensity"]) {
+			seen.intensity = s.settings["viz-intensity"];
+			v.setIntensity(LXSettings.VIZ_MULT[seen.intensity]);
+		}
+		if (seen.palette !== s.palette) v.setPalette((seen.palette = s.palette));
+		if (seen.image !== image) {
+			seen.image = image;
+			v.setArt(image);
+		}
+		if (seen.analysis !== this._analysis) v.setAnalysis((seen.analysis = this._analysis));
+		if (!seen.started) {
+			seen.started = true;
+			v.start();
+		}
+	}
+
 	componentWillUnmount() {
 		this._mounted = false;
+		if (this._viz) this._viz.destroy();
+		this._viz = null;
 		cancelAnimationFrame(this.raf);
 		cancelAnimationFrame(this._bgRaf);
 		clearTimeout(this.hideTimer);
@@ -454,10 +512,12 @@ class LyricsApp extends react.Component {
 		// Fires on seek and periodically during playback. A single catch-up
 		// frame is enough; the rAF loop handles steady playback.
 		this.pokeClock();
+		if (this._viz) this._viz.poke();
 	}
 
 	onPlayPause() {
 		this.pokeClock();
+		if (this._viz) this._viz.poke();
 	}
 
 	onReduceMotionChange(e) {
@@ -478,6 +538,7 @@ class LyricsApp extends react.Component {
 		this._wpShown = null;
 		const signal = this.lyricsAbort.signal;
 
+		this._analysis = null;
 		if (!info) {
 			this.safeSetState({ phase: "none", info: null, data: null, activeIndex: -1, translations: EMPTY_TRANSLATIONS });
 			return;
@@ -501,6 +562,18 @@ class LyricsApp extends react.Component {
 			.catch(() => {});
 
 		if (info.kind !== "track") return;
+
+		// Audio analysis feeds the fullscreen visualizer. Guarded by URI (not the
+		// lyrics token) so a lyrics re-fetch doesn't discard it; until it lands
+		// the visualizer runs on its synthetic signal.
+		LXVisualizer.loadAnalysis(info.uri).then((an) => {
+			if (!this._mounted || !an) return;
+			const cur = this.state.info;
+			if (!cur || cur.uri !== info.uri) return;
+			this._analysis = an;
+			this.syncViz();
+		});
+
 		this.applyLyrics(info, token, signal);
 	}
 
@@ -794,6 +867,7 @@ class LyricsApp extends react.Component {
 					(immersive ? " lx-app--immersive" : "") +
 					(reduceMotion ? " lx-app--still" : "") +
 					(settings["focus-mode"] ? " lx-app--focus" : "") +
+						(immersive && settings.visualizer ? " lx-app--viz" : "") +
 					" lx-anim-" + settings["bg-anim"],
 				ref: this.rootRef,
 				onMouseMove: this.onPointerActivity,
@@ -805,7 +879,14 @@ class LyricsApp extends react.Component {
 				bgStyle: settings["bg-style"],
 				artKey: info ? info.image : "none",
 			}),
-			react.createElement("div", { className: "lx-stage", ref: this.stageRef }, this.renderStage()),
+			immersive && settings.visualizer
+					? react.createElement(
+							"div",
+							{ className: "lx-viz", "aria-hidden": "true" },
+							react.createElement("canvas", { className: "lx-viz__canvas", ref: this.vizRef })
+						)
+					: null,
+				react.createElement("div", { className: "lx-stage", ref: this.stageRef }, this.renderStage()),
 			LXUi.controls({
 				settings,
 				visible: chromeVisible,

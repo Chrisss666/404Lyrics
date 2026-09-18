@@ -51,6 +51,14 @@ const LXSettings = (() => {
 	// Drift speed / amplitude multiplier per level. 0 = decorative motion off.
 	const ANIM_MULT = { off: 0, low: 0.5, normal: 1, high: 1.7 };
 
+	// Fullscreen visualizer reactivity (ring excursion / glow), not an on-off.
+	const VIZ_LEVELS = [
+		["low", "Subtle"],
+		["normal", "Normal"],
+		["high", "Intense"],
+	];
+	const VIZ_MULT = { low: 0.65, normal: 1, high: 1.4 };
+
 	const DEFAULTS = {
 		"translate-enabled": false,
 		"translate-lang": "", // resolved lazily from the client locale on first read
@@ -60,6 +68,8 @@ const LXSettings = (() => {
 		"bg-blur": 70, // 0..100 slider -> ~0..72px (default maps to the current 50px)
 		"bg-dim": 50, // 0..100 slider -> scrim darkness (default maps to the current look)
 		"bg-anim": "normal", // off | low | normal | high
+		visualizer: true, // audio-reactive orb on the right, fullscreen only
+		"viz-intensity": "normal", // low | normal | high
 		autohide: true, // fade the control cluster while the mouse is still
 		"sidebar-lyrics": true, // mini lyrics box in the right sidebar (see sidebar-lyrics.js)
 	};
@@ -119,6 +129,8 @@ const LXSettings = (() => {
 
 		if (key === "bg-style") return BG_STYLES.some(([v]) => v === raw) ? raw : DEFAULTS[key];
 
+		if (key === "viz-intensity") return VIZ_LEVELS.some(([v]) => v === raw) ? raw : DEFAULTS[key];
+
 		if (key === "bg-anim") {
 			if (ANIM_LEVELS.some(([v]) => v === raw)) return raw;
 			// Migrate the old boolean "ambient" toggle: ambient:false -> Off.
@@ -165,6 +177,8 @@ const LXSettings = (() => {
 		bgBlurPx,
 		bgDim,
 		ANIM_MULT,
+		VIZ_LEVELS,
+		VIZ_MULT,
 		LANGUAGES,
 		BG_STYLES,
 		ANIM_LEVELS,

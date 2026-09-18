@@ -28,6 +28,7 @@
         "src/player.js",
         "src/colors.js",
         "src/sync.js",
+        "src/visualizer.js",
         "src/providers.js",
         "src/translate.js",
         "src/ui.js"
