@@ -281,7 +281,13 @@ Spotify install. Debug through Spotify's DevTools.
 
 ## License
 
-[MIT](LICENSE) © Chrisss666
+Copyright © 2026 Christian Reitbauer-Rieger (Chrisss666)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the [GNU General Public License v3.0](LICENSE) as published by the
+Free Software Foundation. It is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE.
 
 ---
 

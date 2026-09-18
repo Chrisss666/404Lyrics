@@ -1,4 +1,5 @@
 /* 404Lyrics - app entry point.
+ * Copyright (C) 2026 Christian Reitbauer-Rieger. Licensed under GPL-3.0 (see LICENSE).
  *
  * Spicetify concatenates the manifest's subfiles ahead of this file into one
  * shared scope and calls the global render(). The subfiles own the hard parts
