@@ -50,6 +50,13 @@ doesn't provide word-level or synchronized lyrics.
   Word/syllable sync, translation and line-sync fallback all still work. An
   opt-in fullscreen action sits next to it; Focus Mode never enters
   fullscreen on its own, and exiting fullscreen keeps Focus Mode on.
+- **Fullscreen visualizer** — in fullscreen, an "aurora orb" blooms on the
+  right: the album art as a slowly turning disc inside layered, smoothed radial
+  curves that follow Spotify's audio analysis (loudness, pitch, timbre, beats),
+  with beat shockwaves and drifting particles tinted by the artwork palette. If
+  the analysis isn't available it falls back to a calm synthetic signal. Toggle
+  it and set its intensity under Settings → Visualizer; it honours reduced
+  motion and is hidden on narrow windows.
 - **A redesigned view, not a reskin.** One large active line, distance-based
   opacity and blur falloff for everything else, and a hair-thin underline that
   fills as playback moves toward the next line.

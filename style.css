@@ -214,6 +214,57 @@
 	display: none;
 }
 
+/* Fullscreen visualizer. Sits between the background (0) and the lyric stage
+ * (2), so lyrics always draw over it; the mask feathers its left edge into the
+ * lyric column. Only mounted in fullscreen (see index.js). */
+.lx-viz {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: 60%;
+	z-index: 1;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 26%);
+	mask-image: linear-gradient(to right, transparent 0, #000 26%);
+	animation: lx-viz-in 1.4s var(--lx-ease) backwards;
+	transition: opacity 0.6s ease;
+}
+
+.lx-viz__canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+@keyframes lx-viz-in {
+	from {
+		opacity: 0;
+		transform: scale(0.94);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+/* Focus Mode wants one calm line; keep the orb but pull it back. */
+.lx-app--focus .lx-viz {
+	opacity: 0.55;
+}
+
+@media (max-width: 900px) {
+	.lx-viz {
+		display: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lx-viz {
+		animation: none;
+	}
+}
+
 /* ───────────────────────────────────────── 3 · LYRIC COLUMN ─────────── */
 
 .lx-stage {
