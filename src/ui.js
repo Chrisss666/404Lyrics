@@ -158,6 +158,7 @@ const LXUi = (() => {
 			h("p", { className: "lx-pop__title" }, "Visualizer"),
 			switchRow("Fullscreen visualizer", s.visualizer, (v) => p.onSetting("visualizer", v), "Audio-reactive orb, fullscreen only"),
 			s.visualizer ? selectRow("Intensity", s["viz-intensity"], LXSettings.VIZ_LEVELS, bg("viz-intensity")) : null,
+			s.visualizer ? selectRow("Shockwave sync", s["viz-pulse"], LXSettings.VIZ_PULSE_MODES, bg("viz-pulse")) : null,
 
 			h("div", { className: "lx-pop__divider" }),
 			d.source

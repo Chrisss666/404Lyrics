@@ -59,6 +59,14 @@ const LXSettings = (() => {
 	];
 	const VIZ_MULT = { low: 0.65, normal: 1, high: 1.4 };
 
+	// What triggers the center pulse / shockwave: Spotify's pre-computed beat
+	// grid, or a live onset detector reacting to loudness rises (closest proxy
+	// to "bass hits" the analysis data allows).
+	const VIZ_PULSE_MODES = [
+		["beat", "Song beat"],
+		["bass", "Bass hits"],
+	];
+
 	const DEFAULTS = {
 		"translate-enabled": false,
 		"translate-lang": "", // resolved lazily from the client locale on first read
@@ -70,6 +78,7 @@ const LXSettings = (() => {
 		"bg-anim": "normal", // off | low | normal | high
 		visualizer: true, // audio-reactive orb on the right, fullscreen only
 		"viz-intensity": "normal", // low | normal | high
+		"viz-pulse": "beat", // beat | bass
 		autohide: true, // fade the control cluster while the mouse is still
 		"sidebar-lyrics": true, // mini lyrics box in the right sidebar (see sidebar-lyrics.js)
 	};
@@ -131,6 +140,8 @@ const LXSettings = (() => {
 
 		if (key === "viz-intensity") return VIZ_LEVELS.some(([v]) => v === raw) ? raw : DEFAULTS[key];
 
+		if (key === "viz-pulse") return VIZ_PULSE_MODES.some(([v]) => v === raw) ? raw : DEFAULTS[key];
+
 		if (key === "bg-anim") {
 			if (ANIM_LEVELS.some(([v]) => v === raw)) return raw;
 			// Migrate the old boolean "ambient" toggle: ambient:false -> Off.
@@ -179,6 +190,7 @@ const LXSettings = (() => {
 		ANIM_MULT,
 		VIZ_LEVELS,
 		VIZ_MULT,
+		VIZ_PULSE_MODES,
 		LANGUAGES,
 		BG_STYLES,
 		ANIM_LEVELS,

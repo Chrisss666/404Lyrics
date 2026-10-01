@@ -163,6 +163,7 @@ const LXVisualizer = (() => {
 			an: null,
 			intensity: 1,
 			reduced: false,
+			pulseMode: "beat", // beat | bass - what drives the shockwave/center pulse
 			accent: parseHex("#8b5cf6"),
 			base: parseHex("#161821"),
 			tAccent: parseHex("#8b5cf6"),
@@ -191,7 +192,11 @@ const LXVisualizer = (() => {
 		let clock = 0; // own monotonic ms, drives idle/synthetic motion + disc spin
 		let lastBeat = -1;
 		let level = 0; // smoothed overall level
-		let pulse = 0; // smoothed beat pulse
+		let pulse = 0; // smoothed pulse driving the shockwave/disc
+		let bassFast = 0; // fast loudness follower, for onset ("bass") mode
+		let bassSlow = 0; // slow loudness follower - the baseline bassFast rises above
+		let bassCooldown = 0; // ms until another bass hit may fire (debounce)
+		let bassTarget = 0; // latest onset strength, decays each frame
 		let quiet = 0; // consecutive settled frames while paused
 		let dead = false;
 
@@ -256,12 +261,35 @@ const LXVisualizer = (() => {
 			}
 
 			level += (reading.level - level) * Math.min(1, (reading.level > level ? 0.28 : 0.07) * k);
-			pulse += (reading.pulse - pulse) * Math.min(1, (reading.pulse > pulse ? 0.85 : 0.16) * k);
 
-			// Beat -> shockwave (only on the natural next beat, never after a seek).
-			if (playing && reading.beatIndex !== lastBeat) {
-				if (lastBeat >= 0 && reading.beatIndex === lastBeat + 1 && shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: 0.4 + reading.pulse * 0.9 });
+			if (state.pulseMode === "bass") {
+				// Fires directly off sudden rises in loudness - the closest thing to
+				// a bass/kick hit Spotify's analysis exposes (it has no literal
+				// frequency bands). A fast follower racing ahead of a slow baseline
+				// is a standard onset detector: it reacts to what's happening in the
+				// audio this instant rather than a pre-computed beat timestamp, so it
+				// stays locked to percussive hits even where the symbolic beat grid
+				// drifts off.
+				bassFast += (reading.level - bassFast) * Math.min(1, 0.55 * k);
+				bassSlow += (reading.level - bassSlow) * Math.min(1, 0.045 * k);
+				bassCooldown = Math.max(0, bassCooldown - dt);
+				const rise = bassFast - bassSlow;
+				if (playing && rise > 0.1 && bassCooldown <= 0) {
+					const str = Math.min(1, 0.35 + rise * 1.8);
+					if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str });
+					bassTarget = Math.min(1, rise * 2.4);
+					bassCooldown = 120; // minimum gap between hits, independent of tempo
+				}
+				bassTarget *= Math.exp(-dt / 150);
+				pulse += (bassTarget - pulse) * Math.min(1, (bassTarget > pulse ? 0.9 : 0.2) * k);
 				lastBeat = reading.beatIndex;
+			} else {
+				pulse += (reading.pulse - pulse) * Math.min(1, (reading.pulse > pulse ? 0.85 : 0.16) * k);
+				// Beat -> shockwave (only on the natural next beat, never after a seek).
+				if (playing && reading.beatIndex !== lastBeat) {
+					if (lastBeat >= 0 && reading.beatIndex === lastBeat + 1 && shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: 0.4 + reading.pulse * 0.9 });
+					lastBeat = reading.beatIndex;
+				}
 			}
 
 			// Band values around the ring, mirrored about the vertical axis so it
@@ -538,6 +566,10 @@ const LXVisualizer = (() => {
 			},
 			setIntensity(v) {
 				state.intensity = Number.isFinite(v) ? v : 1;
+			},
+			setPulseMode(mode) {
+				state.pulseMode = mode === "bass" ? "bass" : "beat";
+				bassFast = bassSlow = bassTarget = bassCooldown = 0;
 			},
 			setReduced(b) {
 				b = !!b;

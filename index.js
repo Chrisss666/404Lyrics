@@ -373,6 +373,7 @@ class LyricsApp extends react.Component {
 			seen.intensity = s.settings["viz-intensity"];
 			v.setIntensity(LXSettings.VIZ_MULT[seen.intensity]);
 		}
+		if (seen.pulseMode !== s.settings["viz-pulse"]) v.setPulseMode((seen.pulseMode = s.settings["viz-pulse"]));
 		if (seen.palette !== s.palette) v.setPalette((seen.palette = s.palette));
 		if (seen.image !== image) {
 			seen.image = image;
