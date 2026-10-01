@@ -48,6 +48,18 @@ const LXVisualizer = (() => {
 			lmax = 0;
 		}
 
+		// Each segment boundary is already a detected timbre/onset change in
+		// Spotify's analysis - the closest thing to a real transient marker it
+		// exposes (there are no raw frequency bands to isolate bass from). Score
+		// each one by how loud it peaks and how fast it gets there, so "bass
+		// hits" mode can fire on percussive segments and skip quiet swells.
+		const lrange = Math.max(6, lmax - lmin);
+		for (const s of segs) {
+			const loud = clamp01((s.lm - lmin) / lrange);
+			const attack = clamp01(1 - s.tm / 260);
+			s.onset = loud * (0.3 + 0.7 * attack);
+		}
+
 		// Beats carry their own confidence and the gap to the next beat, so the
 		// pulse this drives can match each track's tempo and emphasis instead of
 		// firing with the same fixed speed/strength on every beat.
@@ -113,9 +125,13 @@ const LXVisualizer = (() => {
 				const tim = seg.t[i + 1] != null ? Math.tanh(seg.t[i + 1] / 110) * 0.5 + 0.5 : 0.4;
 				out.bands[i] = clamp01(pitch * 0.72 + tim * 0.28);
 			}
+			out.segIndex = si;
+			out.onset = seg.onset || 0;
 		} else {
 			out.level = 0.1;
 			out.bands.fill(0.2);
+			out.segIndex = -1;
+			out.onset = 0;
 		}
 		// Pulse envelope tracks the beat grid: its decay time scales with this
 		// beat's gap to the next one (fast songs snap, slow songs breathe), and
@@ -140,6 +156,9 @@ const LXVisualizer = (() => {
 		for (let i = 0; i < BANDS; i++) out.bands[i] = 0.5 + 0.42 * Math.sin(t / (520 + i * 137) + i * 1.7);
 		out.beatIndex = Math.floor(t / 520);
 		out.pulse = Math.exp(-(t % 520) / 190);
+		out.segIndex = out.beatIndex;
+		out.onset = out.beatIndex !== out._lastSynthBeat ? 0.7 : 0;
+		out._lastSynthBeat = out.beatIndex;
 	}
 
 	/* -------------------------------------------------------------- colour */
@@ -173,7 +192,7 @@ const LXVisualizer = (() => {
 			imgFade: 1,
 		};
 
-		const reading = { level: 0, bands: new Array(BANDS).fill(0), beatIndex: -1, pulse: 0 };
+		const reading = { level: 0, bands: new Array(BANDS).fill(0), beatIndex: -1, pulse: 0, segIndex: -1, onset: 0 };
 		const target = new Float32Array(N);
 		const tmp = new Float32Array(N);
 		const cur = new Float32Array(N); // main ring, fast release
@@ -191,11 +210,9 @@ const LXVisualizer = (() => {
 		let last = 0;
 		let clock = 0; // own monotonic ms, drives idle/synthetic motion + disc spin
 		let lastBeat = -1;
+		let lastSeg = -1; // last segment index seen, for onset ("bass") mode
 		let level = 0; // smoothed overall level
 		let pulse = 0; // smoothed pulse driving the shockwave/disc
-		let bassFast = 0; // fast loudness follower, for onset ("bass") mode
-		let bassSlow = 0; // slow loudness follower - the baseline bassFast rises above
-		let bassCooldown = 0; // ms until another bass hit may fire (debounce)
 		let bassTarget = 0; // latest onset strength, decays each frame
 		let quiet = 0; // consecutive settled frames while paused
 		let dead = false;
@@ -263,26 +280,20 @@ const LXVisualizer = (() => {
 			level += (reading.level - level) * Math.min(1, (reading.level > level ? 0.28 : 0.07) * k);
 
 			if (state.pulseMode === "bass") {
-				// Fires directly off sudden rises in loudness - the closest thing to
-				// a bass/kick hit Spotify's analysis exposes (it has no literal
-				// frequency bands). A fast follower racing ahead of a slow baseline
-				// is a standard onset detector: it reacts to what's happening in the
-				// audio this instant rather than a pre-computed beat timestamp, so it
-				// stays locked to percussive hits even where the symbolic beat grid
-				// drifts off.
-				bassFast += (reading.level - bassFast) * Math.min(1, 0.55 * k);
-				bassSlow += (reading.level - bassSlow) * Math.min(1, 0.045 * k);
-				bassCooldown = Math.max(0, bassCooldown - dt);
-				const rise = bassFast - bassSlow;
-				if (playing && rise > 0.1 && bassCooldown <= 0) {
-					const str = Math.min(1, 0.35 + rise * 1.8);
-					if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str });
-					bassTarget = Math.min(1, rise * 2.4);
-					bassCooldown = 120; // minimum gap between hits, independent of tempo
+				// Fires on segment boundaries that look like a hit (loud + fast
+				// attack) - each boundary is already a detected onset in Spotify's
+				// analysis, so this fires once per actual event instead of an EMA
+				// threshold that can stay tripped (and keep re-firing) for as long
+				// as the audio stays loud.
+				if (playing && reading.segIndex !== lastSeg) {
+					if (lastSeg >= 0 && reading.onset > 0.32 && shocks.length < 4 && !state.reduced) {
+						shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
+						bassTarget = Math.min(1, reading.onset * 1.3);
+					}
+					lastSeg = reading.segIndex;
 				}
 				bassTarget *= Math.exp(-dt / 150);
 				pulse += (bassTarget - pulse) * Math.min(1, (bassTarget > pulse ? 0.9 : 0.2) * k);
-				lastBeat = reading.beatIndex;
 			} else {
 				pulse += (reading.pulse - pulse) * Math.min(1, (reading.pulse > pulse ? 0.85 : 0.16) * k);
 				// Beat -> shockwave (only on the natural next beat, never after a seek).
@@ -563,13 +574,15 @@ const LXVisualizer = (() => {
 			setAnalysis(an) {
 				state.an = an || null;
 				lastBeat = -1;
+				lastSeg = -1;
 			},
 			setIntensity(v) {
 				state.intensity = Number.isFinite(v) ? v : 1;
 			},
 			setPulseMode(mode) {
 				state.pulseMode = mode === "bass" ? "bass" : "beat";
-				bassFast = bassSlow = bassTarget = bassCooldown = 0;
+				bassTarget = 0;
+				lastSeg = -1;
 			},
 			setReduced(b) {
 				b = !!b;
