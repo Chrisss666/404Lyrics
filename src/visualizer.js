@@ -32,8 +32,35 @@ const LXVisualizer = (() => {
 			p: s.pitches || [],
 			t: s.timbre || [],
 		}));
-		const beats = (raw.beats || []).map((b) => b.start * 1000);
-		return { segs, beats };
+
+		// Per-track loudness range, so "level" reads against how loud *this*
+		// track actually gets rather than an assumed fixed dB window - a quiet
+		// acoustic track and a loud, compressed one both use their full range.
+		let lmin = Infinity;
+		let lmax = -Infinity;
+		for (const s of segs) {
+			if (s.l0 < lmin) lmin = s.l0;
+			if (s.lm < lmin) lmin = s.lm;
+			if (s.lm > lmax) lmax = s.lm;
+		}
+		if (!Number.isFinite(lmin) || !Number.isFinite(lmax) || lmax - lmin < 6) {
+			lmin = -42;
+			lmax = 0;
+		}
+
+		// Beats carry their own confidence and the gap to the next beat, so the
+		// pulse this drives can match each track's tempo and emphasis instead of
+		// firing with the same fixed speed/strength on every beat.
+		const rawBeats = raw.beats || [];
+		const beats = rawBeats.map((b, i) => {
+			const t = b.start * 1000;
+			const next = rawBeats[i + 1];
+			const prevT = i > 0 ? rawBeats[i - 1].start * 1000 : null;
+			const interval = next ? next.start * 1000 - t : prevT != null ? t - prevT : 500;
+			return { t, conf: b.confidence != null ? clamp01(b.confidence) : 0.7, interval: Math.max(120, interval) };
+		});
+
+		return { segs, beats, lmin, lmax };
 	}
 
 	/* Fetch + normalise the analysis for a track. Resolves to null (never
@@ -79,7 +106,8 @@ const LXVisualizer = (() => {
 			let db;
 			if (local < seg.tm) db = lerp(seg.l0, seg.lm, local / seg.tm);
 			else db = lerp(seg.lm, next ? next.l0 : seg.l0, clamp01((local - seg.tm) / Math.max(1, seg.d - seg.tm)));
-			out.level = Math.pow(clamp01((db + 42) / 42), 1.5);
+			const range = Math.max(6, an.lmax - an.lmin);
+			out.level = Math.pow(clamp01((db - an.lmin) / range), 1.4);
 			for (let i = 0; i < BANDS; i++) {
 				const pitch = seg.p[i] != null ? seg.p[i] : 0.3;
 				const tim = seg.t[i + 1] != null ? Math.tanh(seg.t[i + 1] / 110) * 0.5 + 0.5 : 0.4;
@@ -89,9 +117,21 @@ const LXVisualizer = (() => {
 			out.level = 0.1;
 			out.bands.fill(0.2);
 		}
-		const bi = lastAtOrBefore(an.beats, pos, (b) => b);
+		// Pulse envelope tracks the beat grid: its decay time scales with this
+		// beat's gap to the next one (fast songs snap, slow songs breathe), and
+		// its peak strength blends Spotify's beat confidence with how loud the
+		// track is right now - so no two tracks (or beats) pulse identically.
+		const bi = lastAtOrBefore(an.beats, pos, (b) => b.t);
 		out.beatIndex = bi;
-		out.pulse = bi >= 0 ? Math.exp(-(pos - an.beats[bi]) / 190) : 0;
+		if (bi >= 0) {
+			const b = an.beats[bi];
+			const since = pos - b.t;
+			const decay = Math.min(420, Math.max(90, b.interval * 0.5));
+			const strength = Math.min(1, 0.35 + b.conf * 0.45 + out.level * 0.3);
+			out.pulse = since >= 0 ? Math.exp(-since / decay) * strength : 0;
+		} else {
+			out.pulse = 0;
+		}
 	}
 
 	// Stand-in signal used until (or instead of) real analysis.
@@ -216,11 +256,11 @@ const LXVisualizer = (() => {
 			}
 
 			level += (reading.level - level) * Math.min(1, (reading.level > level ? 0.28 : 0.07) * k);
-			pulse += (reading.pulse - pulse) * Math.min(1, (reading.pulse > pulse ? 0.6 : 0.16) * k);
+			pulse += (reading.pulse - pulse) * Math.min(1, (reading.pulse > pulse ? 0.85 : 0.16) * k);
 
 			// Beat -> shockwave (only on the natural next beat, never after a seek).
 			if (playing && reading.beatIndex !== lastBeat) {
-				if (lastBeat >= 0 && reading.beatIndex === lastBeat + 1 && shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: 0.5 + level * 0.5 });
+				if (lastBeat >= 0 && reading.beatIndex === lastBeat + 1 && shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: 0.4 + reading.pulse * 0.9 });
 				lastBeat = reading.beatIndex;
 			}
 
@@ -346,7 +386,7 @@ const LXVisualizer = (() => {
 			const cx = W * 0.5;
 			const cy = H * 0.5;
 			const R = Math.min(W, H) * 0.5 * 0.9; // outermost reach
-			const rd = R * 0.36 * (1 + pulse * 0.045 * I); // disc radius
+			const rd = R * 0.36 * (1 + pulse * 0.1 * I); // disc radius
 			const r0 = R * 0.5; // ring base radius
 			const amp = R * 0.46 * I; // ring excursion
 			const acc = state.accent;
