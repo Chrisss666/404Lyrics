@@ -104,6 +104,25 @@ const LXUi = (() => {
 		);
 	}
 
+	// One line saying which input the bass detector is using and whether it works.
+	function bassStatus(v) {
+		const name = v.label ? "\u201c" + v.label + "\u201d" : "";
+		const map = {
+			starting: ["busy", "Opening audio input\u2026"],
+			listening: ["ok", "Hearing bass from " + name],
+			quiet: ["warn", name + " isn\u2019t hearing bass \u2013 using song analysis instead. Pick a loopback input (Stereo Mix, BlackHole, monitor)."],
+			denied: ["warn", "No audio input available \u2013 using song analysis. Allow microphone access or pick an input."],
+		};
+		const m = map[v.state];
+		if (!m) return null;
+		return h(
+			"p",
+			{ className: "lx-pop__status lx-pop__status--" + m[0] },
+			m[0] === "busy" ? h("span", { className: "lx-pop__dot", "aria-hidden": "true" }) : null,
+			m[1]
+		);
+	}
+
 	function settingsPopover(p) {
 		if (!p.open) return null;
 		const s = p.settings;
@@ -159,6 +178,15 @@ const LXUi = (() => {
 			switchRow("Fullscreen visualizer", s.visualizer, (v) => p.onSetting("visualizer", v), "Audio-reactive orb, fullscreen only"),
 			s.visualizer ? selectRow("Intensity", s["viz-intensity"], LXSettings.VIZ_LEVELS, bg("viz-intensity")) : null,
 			s.visualizer ? selectRow("Shockwave sync", s["viz-pulse"], LXSettings.VIZ_PULSE_MODES, bg("viz-pulse")) : null,
+			s.visualizer && s["viz-pulse"] === "bass"
+				? selectRow(
+						"Audio input",
+						s["viz-input"],
+						[["", "Auto (loopback if found)"]].concat(d.viz && d.viz.devices ? d.viz.devices : []),
+						bg("viz-input")
+					)
+				: null,
+			s.visualizer && s["viz-pulse"] === "bass" && d.viz ? bassStatus(d.viz) : null,
 
 			h("div", { className: "lx-pop__divider" }),
 			d.source

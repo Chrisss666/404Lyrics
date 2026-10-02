@@ -79,6 +79,7 @@ const LXSettings = (() => {
 		visualizer: true, // audio-reactive orb on the right, fullscreen only
 		"viz-intensity": "normal", // low | normal | high
 		"viz-pulse": "beat", // beat | bass
+		"viz-input": "", // audio input deviceId for bass hits ("" = auto, prefers a loopback device)
 		autohide: true, // fade the control cluster while the mouse is still
 		"sidebar-lyrics": true, // mini lyrics box in the right sidebar (see sidebar-lyrics.js)
 	};
