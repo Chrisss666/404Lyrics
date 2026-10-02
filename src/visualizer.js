@@ -200,6 +200,7 @@ const LXVisualizer = (() => {
 		let avg = 0;
 		let prev = 0;
 		let lastHit = -1e9;
+		let quietSince = 0;
 		let token = 0;
 
 		function release() {
@@ -254,6 +255,7 @@ const LXVisualizer = (() => {
 				lo = Math.max(1, Math.floor(40 / binHz));
 				hi = Math.max(lo + 1, Math.ceil(150 / binHz));
 				avg = prev = 0;
+				quietSince = -1;
 				status = "live";
 			} catch (e) {
 				release();
@@ -273,6 +275,13 @@ const LXVisualizer = (() => {
 			let sum = 0;
 			for (let i = lo; i <= hi; i++) sum += data[i];
 			const e = sum / ((hi - lo + 1) * 255);
+			// An input that isn't carrying the music (e.g. an idle mic) never
+			// shows bass energy; report null so the caller uses analysis onsets.
+			if (quietSince < 0 || e > 0.06) quietSince = now;
+			if (now - quietSince > 2500) {
+				avg = prev = 0;
+				return null;
+			}
 			avg += (e - avg) * 0.03; // ~1s running baseline
 			const rise = e - prev;
 			prev = e;
