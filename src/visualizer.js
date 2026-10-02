@@ -53,11 +53,30 @@ const LXVisualizer = (() => {
 		// exposes (there are no raw frequency bands to isolate bass from). Score
 		// each one by how loud it peaks and how fast it gets there, so "bass
 		// hits" mode can fire on percussive segments and skip quiet swells.
+		// Timbre[1] is spectral "brightness": low values mean low-end-heavy
+		// (kicks, bass), so it's weighted in to favour bass hits over hats/vocals.
+		// The raw scores are then rank-normalised per track, so "onset" is the
+		// percentile within THIS song - the top ~third fire, whatever the mix.
 		const lrange = Math.max(6, lmax - lmin);
+		const bright = segs.map((s) => (s.t[1] != null ? s.t[1] : 0)).sort((a, b) => a - b);
+		const bLo = bright[Math.floor(bright.length * 0.1)];
+		const bHi = bright[Math.floor(bright.length * 0.9)];
 		for (const s of segs) {
 			const loud = clamp01((s.lm - lmin) / lrange);
 			const attack = clamp01(1 - s.tm / 260);
-			s.onset = loud * (0.3 + 0.7 * attack);
+			const bass = bHi > bLo ? clamp01(1 - ((s.t[1] != null ? s.t[1] : bHi) - bLo) / (bHi - bLo)) : 0.5;
+			s.raw = loud * (0.3 + 0.7 * attack) * (0.35 + 0.65 * bass);
+		}
+		const ranked = segs.map((s) => s.raw).sort((a, b) => a - b);
+		for (const s of segs) {
+			let lo = 0;
+			let hi = ranked.length;
+			while (lo < hi) {
+				const mid = (lo + hi) >> 1;
+				if (ranked[mid] < s.raw) lo = mid + 1;
+				else hi = mid;
+			}
+			s.onset = lo / Math.max(1, ranked.length - 1);
 		}
 
 		// Beats carry their own confidence and the gap to the next beat, so the
@@ -157,7 +176,8 @@ const LXVisualizer = (() => {
 		out.beatIndex = Math.floor(t / 520);
 		out.pulse = Math.exp(-(t % 520) / 190);
 		out.segIndex = out.beatIndex;
-		out.onset = out.beatIndex !== out._lastSynthBeat ? 0.7 : 0;
+		// Kick-like: only every other beat, so bass mode differs from beat mode.
+		out.onset = out.beatIndex !== out._lastSynthBeat && out.beatIndex % 2 === 0 ? 0.95 : 0;
 		out._lastSynthBeat = out.beatIndex;
 	}
 
@@ -286,8 +306,8 @@ const LXVisualizer = (() => {
 				// threshold that can stay tripped (and keep re-firing) for as long
 				// as the audio stays loud.
 				if (playing && reading.segIndex !== lastSeg) {
-					if (lastSeg >= 0 && reading.onset > 0.32 && shocks.length < 4 && !state.reduced) {
-						shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
+					if (lastSeg >= 0 && reading.onset > 0.68) {
+						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
 						bassTarget = Math.min(1, reading.onset * 1.3);
 					}
 					lastSeg = reading.segIndex;
