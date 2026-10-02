@@ -57,6 +57,11 @@ doesn't provide word-level or synchronized lyrics.
   the analysis isn't available it falls back to a calm synthetic signal. Toggle
   it and set its intensity under Settings → Visualizer; it honours reduced
   motion and is hidden on narrow windows.
+  *Shockwave sync → Bass hits (live audio)* listens to an audio input for
+  40–150 Hz kicks; for it to hear Spotify, select a loopback device (Stereo Mix,
+  BlackHole, a PulseAudio monitor, VB-Cable) as input — one is picked
+  automatically when its name matches. Without one it falls back to analysis
+  onsets.
 - **Share lyric cards** — the share button in the control cluster opens a
   picker: choose up to 8 lines (the current line is pre-selected), pick
   Square / Story / Wide, optionally include the translation, and copy the

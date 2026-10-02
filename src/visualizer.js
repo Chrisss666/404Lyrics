@@ -181,6 +181,109 @@ const LXVisualizer = (() => {
 		out._lastSynthBeat = out.beatIndex;
 	}
 
+	/* ------------------------------------------------------------ live bass */
+
+	/* Spotify plays audio natively, so the page can't read the stream directly.
+	 * Instead this listens to an audio *input* - ideally a loopback / "what you
+	 * hear" device (Stereo Mix, BlackHole, a PulseAudio monitor, VB-Cable) - and
+	 * watches the 40-150 Hz band for kick/bass transients. If no input can be
+	 * opened it reports "unavailable" and callers fall back to analysis onsets. */
+	function createBassTap() {
+		const LOOPBACK = /stereo mix|what u hear|loopback|blackhole|monitor|cable|soundflower|mix/i;
+		let status = "off"; // off | starting | live | unavailable
+		let actx = null;
+		let stream = null;
+		let analyser = null;
+		let data = null;
+		let lo = 0;
+		let hi = 0;
+		let avg = 0;
+		let prev = 0;
+		let lastHit = -1e9;
+		let token = 0;
+
+		function release() {
+			token++;
+			if (stream) stream.getTracks().forEach((t) => t.stop());
+			if (actx && actx.close) actx.close().catch(() => {});
+			stream = actx = analyser = data = null;
+		}
+
+		const open = (deviceId) =>
+			navigator.mediaDevices.getUserMedia({
+				audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+			});
+
+		async function start() {
+			if (status === "starting" || status === "live") return;
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				status = "unavailable";
+				return;
+			}
+			status = "starting";
+			const mine = ++token;
+			try {
+				let st = await open();
+				// Labels only appear after permission; switch to a loopback device if one exists.
+				const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+				const cur = st.getAudioTracks()[0];
+				const pick = devs.find((d) => LOOPBACK.test(d.label));
+				if (pick && cur && cur.getSettings().deviceId !== pick.deviceId) {
+					try {
+						const st2 = await open(pick.deviceId);
+						st.getTracks().forEach((t) => t.stop());
+						st = st2;
+					} catch (e) {
+						/* keep the default input */
+					}
+				}
+				if (mine !== token) {
+					st.getTracks().forEach((t) => t.stop());
+					return;
+				}
+				const AC = window.AudioContext || window.webkitAudioContext;
+				actx = new AC();
+				if (actx.state === "suspended") actx.resume().catch(() => {});
+				analyser = actx.createAnalyser();
+				analyser.fftSize = 2048;
+				analyser.smoothingTimeConstant = 0;
+				actx.createMediaStreamSource(st).connect(analyser);
+				stream = st;
+				data = new Uint8Array(analyser.frequencyBinCount);
+				const binHz = actx.sampleRate / analyser.fftSize;
+				lo = Math.max(1, Math.floor(40 / binHz));
+				hi = Math.max(lo + 1, Math.ceil(150 / binHz));
+				avg = prev = 0;
+				status = "live";
+			} catch (e) {
+				release();
+				status = "unavailable";
+			}
+		}
+
+		function stop() {
+			release();
+			status = "off";
+		}
+
+		// { hit, level } for this frame; hit is true once per bass transient.
+		function read(now) {
+			if (status !== "live" || !analyser) return null;
+			analyser.getByteFrequencyData(data);
+			let sum = 0;
+			for (let i = lo; i <= hi; i++) sum += data[i];
+			const e = sum / ((hi - lo + 1) * 255);
+			avg += (e - avg) * 0.03; // ~1s running baseline
+			const rise = e - prev;
+			prev = e;
+			const hit = e > avg * 1.22 + 0.05 && rise > 0.015 && now - lastHit > 140;
+			if (hit) lastHit = now;
+			return { hit, level: clamp01((e - avg) / 0.3) };
+		}
+
+		return { start, stop, read, status: () => status };
+	}
+
 	/* -------------------------------------------------------------- colour */
 
 	function parseHex(hex) {
@@ -221,6 +324,7 @@ const LXVisualizer = (() => {
 		const px = new Float32Array(N);
 		const py = new Float32Array(N);
 
+		const tap = createBassTap();
 		const shocks = [];
 		const particles = Array.from({ length: 34 }, () => ({ a: Math.random() * TAU, r: Math.random(), v: 0.00006 + Math.random() * 0.00008, s: 0.6 + Math.random() * 1.4, w: (Math.random() - 0.5) * 0.00018 }));
 
@@ -300,18 +404,21 @@ const LXVisualizer = (() => {
 			level += (reading.level - level) * Math.min(1, (reading.level > level ? 0.28 : 0.07) * k);
 
 			if (state.pulseMode === "bass") {
-				// Fires on segment boundaries that look like a hit (loud + fast
-				// attack) - each boundary is already a detected onset in Spotify's
-				// analysis, so this fires once per actual event instead of an EMA
-				// threshold that can stay tripped (and keep re-firing) for as long
-				// as the audio stays loud.
-				if (playing && reading.segIndex !== lastSeg) {
+				const live = playing ? tap.read(clock) : null;
+				if (live) {
+					// Real low-end energy from the audio input.
+					if (live.hit) {
+						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.4 + live.level * 0.7) });
+						bassTarget = Math.max(bassTarget, Math.min(1, 0.55 + live.level * 0.6));
+					}
+				} else if (playing && reading.segIndex !== lastSeg) {
+					// No audio input: approximate with analysis onsets (per segment).
 					if (lastSeg >= 0 && reading.onset > 0.68) {
 						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
 						bassTarget = Math.min(1, reading.onset * 1.3);
 					}
-					lastSeg = reading.segIndex;
 				}
+				if (playing) lastSeg = reading.segIndex;
 				bassTarget *= Math.exp(-dt / 150);
 				pulse += (bassTarget - pulse) * Math.min(1, (bassTarget > pulse ? 0.9 : 0.2) * k);
 			} else {
@@ -603,7 +710,10 @@ const LXVisualizer = (() => {
 				state.pulseMode = mode === "bass" ? "bass" : "beat";
 				bassTarget = 0;
 				lastSeg = -1;
+				if (state.pulseMode === "bass") tap.start();
+				else tap.stop();
 			},
+			bassStatus: () => tap.status(),
 			setReduced(b) {
 				b = !!b;
 				if (b === state.reduced) return;
@@ -616,6 +726,7 @@ const LXVisualizer = (() => {
 			destroy() {
 				dead = true;
 				stop();
+				tap.stop();
 				if (observer) observer.disconnect();
 				state.img = state.prevImg = null;
 			},
