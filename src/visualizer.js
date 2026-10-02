@@ -186,7 +186,7 @@ const LXVisualizer = (() => {
 	/* Spotify plays audio natively, so the page can't read the stream directly.
 	 * Instead this listens to an audio *input* - ideally a loopback / "what you
 	 * hear" device (Stereo Mix, BlackHole, a PulseAudio monitor, VB-Cable) - and
-	 * watches the 40-150 Hz band for kick/bass transients. If no input can be
+	 * watches the 40-120 Hz band for kick/bass transients. If no input can be
 	 * opened it reports "unavailable" and callers fall back to analysis onsets. */
 	function createBassTap() {
 		const LOOPBACK = /stereo mix|what u hear|loopback|blackhole|monitor|cable|soundflower|mix/i;
@@ -280,7 +280,7 @@ const LXVisualizer = (() => {
 				data = new Float32Array(analyser.frequencyBinCount);
 				const binHz = actx.sampleRate / analyser.fftSize;
 				lo = Math.max(1, Math.floor(40 / binHz));
-				hi = Math.max(lo + 1, Math.ceil(150 / binHz));
+				hi = Math.max(lo + 1, Math.ceil(120 / binHz));
 				avg = -1;
 				lastHit = -1;
 				const track = st.getAudioTracks()[0];
@@ -315,7 +315,7 @@ const LXVisualizer = (() => {
 		function read(now) {
 			if (!analyser || (state !== "listening" && state !== "quiet")) return null;
 			analyser.getFloatFrequencyData(data);
-			// dB -> linear power over 40-150 Hz: a kick roughly doubles it, which
+			// dB -> linear power over 40-120 Hz: a kick roughly doubles it, which
 			// the (log-scaled) byte data would hide.
 			let p = 0;
 			for (let i = lo; i <= hi; i++) p += Math.pow(10, data[i] / 10);
@@ -325,7 +325,7 @@ const LXVisualizer = (() => {
 				lastHit = now;
 			}
 			const ratio = p / Math.max(avg, 1e-12);
-			const hit = p > 1e-7 && ratio > 1.7 && p > prev * 1.1 && now - lastHit > 150;
+			const hit = p > 2e-6 && ratio > 1.9 && p > prev * 1.1 && now - lastHit > 150;
 			avg += (p - avg) * 0.04;
 			prev = p;
 			if (hit) lastHit = now;
@@ -473,8 +473,9 @@ const LXVisualizer = (() => {
 					// Real low-end energy from the audio input.
 					if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.4 + live.level * 0.7) });
 					bassTarget = Math.max(bassTarget, Math.min(1, 0.55 + live.level * 0.6));
-				} else if ((!live || !live.live) && playing && reading.segIndex !== lastSeg) {
-					// Input missing or not hearing the music: approximate with analysis onsets.
+				} else if (!live && playing && reading.segIndex !== lastSeg) {
+					// No audio input at all: approximate with analysis onsets. (With an input,
+					// no bass means no pulse - never guess on top of it.)
 					if (lastSeg >= 0 && reading.onset > 0.68) {
 						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
 						bassTarget = Math.min(1, reading.onset * 1.3);

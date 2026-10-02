@@ -58,7 +58,7 @@ doesn't provide word-level or synchronized lyrics.
   it and set its intensity under Settings → Visualizer; it honours reduced
   motion and is hidden on narrow windows.
   *Shockwave sync → Bass hits (live audio)* listens to an audio input for
-  40–150 Hz kicks; for it to hear Spotify, select a loopback device (Stereo Mix,
+  40–120 Hz kicks; for it to hear Spotify, select a loopback device (Stereo Mix,
   BlackHole, a PulseAudio monitor, VB-Cable) as input — one is picked
   automatically when its name matches. Without one it falls back to analysis
   onsets.

@@ -60,7 +60,7 @@ const LXSettings = (() => {
 	const VIZ_MULT = { low: 0.65, normal: 1, high: 1.4 };
 
 	// What triggers the center pulse / shockwave: Spotify's pre-computed beat
-	// grid, or the 40-150 Hz energy of a live audio input (loopback device),
+	// grid, or the 40-120 Hz energy of a live audio input (loopback device),
 	// falling back to analysis-based onsets when no input can be opened.
 	const VIZ_PULSE_MODES = [
 		["beat", "Song beat"],
