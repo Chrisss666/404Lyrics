@@ -110,7 +110,7 @@ const LXUi = (() => {
 		const map = {
 			starting: ["busy", "Opening audio input\u2026"],
 			listening: ["ok", "Hearing bass from " + name],
-			quiet: ["warn", name + " isn\u2019t hearing bass \u2013 using song analysis instead. Pick a loopback input (Stereo Mix, BlackHole, monitor)."],
+			quiet: ["muted", name + ": no bass right now. If music is playing and this stays, the input isn\u2019t carrying Spotify\u2019s audio \u2013 pick a loopback input."],
 			denied: ["warn", "No audio input available \u2013 using song analysis. Allow microphone access or pick an input."],
 		};
 		const m = map[v.state];
