@@ -164,6 +164,7 @@ class LyricsApp extends react.Component {
 		super(props);
 		this.state = {
 			phase: "loading", // loading | lyrics | none | instrumental | unsupported
+			vizInfo: null, // bass-input status from the visualizer, shown in the settings popover
 			info: null,
 			data: null,
 			palette: LXColors.FALLBACK,
@@ -353,6 +354,7 @@ class LyricsApp extends react.Component {
 				this._viz.destroy();
 				this._viz = null;
 				this._vizCanvas = null;
+				this.setState({ vizInfo: null });
 			}
 			return;
 		}
@@ -373,6 +375,11 @@ class LyricsApp extends react.Component {
 			seen.intensity = s.settings["viz-intensity"];
 			v.setIntensity(LXSettings.VIZ_MULT[seen.intensity]);
 		}
+		if (!seen.listening) {
+			seen.listening = true;
+			v.setStatusListener((info) => this._mounted && this.setState({ vizInfo: info }));
+		}
+		if (seen.input !== s.settings["viz-input"]) v.setInputDevice((seen.input = s.settings["viz-input"]));
 		if (seen.pulseMode !== s.settings["viz-pulse"]) v.setPulseMode((seen.pulseMode = s.settings["viz-pulse"]));
 		if (seen.palette !== s.palette) v.setPalette((seen.palette = s.palette));
 		if (seen.image !== image) {
@@ -903,6 +910,7 @@ class LyricsApp extends react.Component {
 					detected: translations.detected || "",
 					cacheCount: LXTranslate.cacheCount(),
 					wordSyncPossible: !!data && data.kind === "richsync",
+					viz: this.state.vizInfo || null,
 				},
 				onInteract: this.onPointerActivity,
 				onToggleTranslate: () => this.toggleTranslate(),

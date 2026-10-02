@@ -190,18 +190,35 @@ const LXVisualizer = (() => {
 	 * opened it reports "unavailable" and callers fall back to analysis onsets. */
 	function createBassTap() {
 		const LOOPBACK = /stereo mix|what u hear|loopback|blackhole|monitor|cable|soundflower|mix/i;
-		let status = "off"; // off | starting | live | unavailable
+		const WINDOW = 4000; // ms without a bass hit before the input counts as "quiet"
+		let state = "off"; // off | starting | listening | quiet | denied
+		let label = "";
+		let devices = []; // [[deviceId, label]]
+		let wantId = ""; // "" = auto
 		let actx = null;
 		let stream = null;
 		let analyser = null;
 		let data = null;
 		let lo = 0;
 		let hi = 0;
-		let avg = 0;
+		let avg = -1;
 		let prev = 0;
-		let lastHit = -1e9;
-		let quietSince = 0;
+		let lastHit = 0;
 		let token = 0;
+		let listener = null;
+		let sent = "";
+
+		function emit() {
+			const info = { state, label, devices };
+			const key = state + "|" + label + "|" + devices.length;
+			if (key === sent) return;
+			sent = key;
+			if (listener) listener(info);
+		}
+		function setState(s) {
+			state = s;
+			emit();
+		}
 
 		function release() {
 			token++;
@@ -216,26 +233,36 @@ const LXVisualizer = (() => {
 			});
 
 		async function start() {
-			if (status === "starting" || status === "live") return;
+			if (state === "starting" || state === "listening" || state === "quiet") return;
 			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-				status = "unavailable";
+				label = "";
+				setState("denied");
 				return;
 			}
-			status = "starting";
+			setState("starting");
 			const mine = ++token;
 			try {
-				let st = await open();
-				// Labels only appear after permission; switch to a loopback device if one exists.
-				const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
-				const cur = st.getAudioTracks()[0];
-				const pick = devs.find((d) => LOOPBACK.test(d.label));
-				if (pick && cur && cur.getSettings().deviceId !== pick.deviceId) {
-					try {
-						const st2 = await open(pick.deviceId);
-						st.getTracks().forEach((t) => t.stop());
-						st = st2;
-					} catch (e) {
-						/* keep the default input */
+				let st;
+				try {
+					st = await open(wantId);
+				} catch (e) {
+					if (!wantId) throw e;
+					st = await open(); // chosen device vanished: use the default
+				}
+				const all = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+				devices = all.map((d) => [d.deviceId, d.label || "Audio input"]);
+				// Auto mode: switch to a loopback device if one exists.
+				if (!wantId) {
+					const cur = st.getAudioTracks()[0];
+					const pick = all.find((d) => LOOPBACK.test(d.label));
+					if (pick && cur && cur.getSettings().deviceId !== pick.deviceId) {
+						try {
+							const st2 = await open(pick.deviceId);
+							st.getTracks().forEach((t) => t.stop());
+							st = st2;
+						} catch (e) {
+							/* keep the default input */
+						}
 					}
 				}
 				if (mine !== token) {
@@ -250,47 +277,75 @@ const LXVisualizer = (() => {
 				analyser.smoothingTimeConstant = 0;
 				actx.createMediaStreamSource(st).connect(analyser);
 				stream = st;
-				data = new Uint8Array(analyser.frequencyBinCount);
+				data = new Float32Array(analyser.frequencyBinCount);
 				const binHz = actx.sampleRate / analyser.fftSize;
 				lo = Math.max(1, Math.floor(40 / binHz));
 				hi = Math.max(lo + 1, Math.ceil(150 / binHz));
-				avg = prev = 0;
-				quietSince = -1;
-				status = "live";
+				avg = -1;
+				lastHit = -1;
+				const track = st.getAudioTracks()[0];
+				label = (track && track.label) || "Audio input";
+				setState("listening");
 			} catch (e) {
 				release();
-				status = "unavailable";
+				label = "";
+				setState("denied");
 			}
 		}
 
 		function stop() {
 			release();
-			status = "off";
+			label = "";
+			setState("off");
 		}
 
-		// { hit, level } for this frame; hit is true once per bass transient.
-		function read(now) {
-			if (status !== "live" || !analyser) return null;
-			analyser.getByteFrequencyData(data);
-			let sum = 0;
-			for (let i = lo; i <= hi; i++) sum += data[i];
-			const e = sum / ((hi - lo + 1) * 255);
-			// An input that isn't carrying the music (e.g. an idle mic) never
-			// shows bass energy; report null so the caller uses analysis onsets.
-			if (quietSince < 0 || e > 0.06) quietSince = now;
-			if (now - quietSince > 2500) {
-				avg = prev = 0;
-				return null;
+		// Restart on a different input ("" = auto).
+		function setDevice(id) {
+			id = id || "";
+			if (id === wantId) return;
+			wantId = id;
+			if (state !== "off") {
+				stop();
+				start();
 			}
-			avg += (e - avg) * 0.03; // ~1s running baseline
-			const rise = e - prev;
-			prev = e;
-			const hit = e > avg * 1.22 + 0.05 && rise > 0.015 && now - lastHit > 140;
-			if (hit) lastHit = now;
-			return { hit, level: clamp01((e - avg) / 0.3) };
 		}
 
-		return { start, stop, read, status: () => status };
+		/* One frame: { hit, level, live } or null when there is no input. `live`
+		 * is false while the input hears no bass, so callers can fall back. */
+		function read(now) {
+			if (!analyser || (state !== "listening" && state !== "quiet")) return null;
+			analyser.getFloatFrequencyData(data);
+			// dB -> linear power over 40-150 Hz: a kick roughly doubles it, which
+			// the (log-scaled) byte data would hide.
+			let p = 0;
+			for (let i = lo; i <= hi; i++) p += Math.pow(10, data[i] / 10);
+			if (avg < 0) {
+				avg = p;
+				prev = p;
+				lastHit = now;
+			}
+			const ratio = p / Math.max(avg, 1e-12);
+			const hit = p > 1e-7 && ratio > 1.7 && p > prev * 1.1 && now - lastHit > 150;
+			avg += (p - avg) * 0.04;
+			prev = p;
+			if (hit) lastHit = now;
+			const live = now - lastHit < WINDOW;
+			if (live !== (state === "listening")) setState(live ? "listening" : "quiet");
+			return { hit, level: clamp01(Math.log2(Math.max(ratio, 1)) / 3), live };
+		}
+
+		return {
+			start,
+			stop,
+			read,
+			setDevice,
+			state: () => state,
+			setListener(fn) {
+				listener = fn;
+				sent = "";
+				emit();
+			},
+		};
 	}
 
 	/* -------------------------------------------------------------- colour */
@@ -414,14 +469,12 @@ const LXVisualizer = (() => {
 
 			if (state.pulseMode === "bass") {
 				const live = playing ? tap.read(clock) : null;
-				if (live) {
+				if (live && live.hit) {
 					// Real low-end energy from the audio input.
-					if (live.hit) {
-						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.4 + live.level * 0.7) });
-						bassTarget = Math.max(bassTarget, Math.min(1, 0.55 + live.level * 0.6));
-					}
-				} else if (playing && reading.segIndex !== lastSeg) {
-					// No audio input: approximate with analysis onsets (per segment).
+					if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.4 + live.level * 0.7) });
+					bassTarget = Math.max(bassTarget, Math.min(1, 0.55 + live.level * 0.6));
+				} else if ((!live || !live.live) && playing && reading.segIndex !== lastSeg) {
+					// Input missing or not hearing the music: approximate with analysis onsets.
 					if (lastSeg >= 0 && reading.onset > 0.68) {
 						if (shocks.length < 4 && !state.reduced) shocks.push({ age: 0, str: Math.min(1, 0.35 + reading.onset * 0.9) });
 						bassTarget = Math.min(1, reading.onset * 1.3);
@@ -722,7 +775,8 @@ const LXVisualizer = (() => {
 				if (state.pulseMode === "bass") tap.start();
 				else tap.stop();
 			},
-			bassStatus: () => tap.status(),
+			setInputDevice: (id) => tap.setDevice(id),
+			setStatusListener: (fn) => tap.setListener(fn),
 			setReduced(b) {
 				b = !!b;
 				if (b === state.reduced) return;
